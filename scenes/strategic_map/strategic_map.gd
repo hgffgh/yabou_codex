@@ -405,23 +405,17 @@ func _on_produce_pressed() -> void:
 	_update_info_panel()
 	_update_turn_ui()
 
-## Shows the front (actively building) job's remaining turns plus a list
-## of anything queued behind it — the front is the only one whose
-## turns_remaining actually ticks down each turn (see
-## TurnManager._advance_production).
+## Every queued job builds in parallel (see TurnManager._advance_production),
+## so each gets its own "remaining turns" line rather than one number for
+## a single active job plus a waiting list.
 func _build_queue_text(region: Region) -> String:
 	if region.pending_production.is_empty():
 		return "生産キュー: なし"
-	var front = region.pending_production[0]
-	var front_udef: UnitType = GameState.unit_defs[front["unit_type_id"]]
-	var text := "生産中: %s（残り%dターン）" % [front_udef.display_name, front["turns_remaining"]]
-	if region.pending_production.size() > 1:
-		var queued_names: Array = []
-		for i in range(1, region.pending_production.size()):
-			var udef: UnitType = GameState.unit_defs[region.pending_production[i]["unit_type_id"]]
-			queued_names.append(udef.display_name)
-		text += "\n待機中: %s" % ", ".join(queued_names)
-	return text
+	var lines: Array = []
+	for job in region.pending_production:
+		var udef: UnitType = GameState.unit_defs[job["unit_type_id"]]
+		lines.append("%s（残り%dターン）" % [udef.display_name, job["turns_remaining"]])
+	return "生産中:\n" + "\n".join(lines)
 
 func _on_move_pressed() -> void:
 	if _selected_region_id == &"":
