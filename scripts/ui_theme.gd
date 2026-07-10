@@ -24,6 +24,13 @@ static func _build() -> Theme:
 	var theme := Theme.new()
 	theme.default_font_size = 15
 
+	# Noto Sans JP (SIL OFL 1.1, no attribution required) — placeholder
+	# typeface until real art direction lands; Godot's built-in editor font
+	# has patchy CJK coverage, this one's a proper Japanese Sans face.
+	var font_path := "res://assets/fonts/NotoSansJP-Variable.ttf"
+	if ResourceLoader.exists(font_path):
+		theme.default_font = load(font_path)
+
 	var btn_normal := _style(COLOR_PANEL_RAISED, COLOR_BORDER, 8)
 	var btn_hover := _style(COLOR_PANEL_RAISED.lightened(0.1), COLOR_ACCENT, 8)
 	var btn_pressed := _style(COLOR_PANEL_RAISED.darkened(0.15), COLOR_ACCENT, 8)
@@ -38,6 +45,9 @@ static func _build() -> Theme:
 		theme.set_color("font_hover_color", type_name, COLOR_TEXT)
 		theme.set_color("font_pressed_color", type_name, COLOR_TEXT)
 		theme.set_color("font_disabled_color", type_name, COLOR_TEXT_DIM)
+		# Our source icons are 128x128 SVGs — without this every dropdown/
+		# button icon would render at full size instead of a small glyph.
+		theme.set_constant("icon_max_width", type_name, 20)
 
 	var panel_style := _style(COLOR_PANEL, COLOR_BORDER, 12)
 	theme.set_stylebox("panel", "PanelContainer", panel_style)

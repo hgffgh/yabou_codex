@@ -22,8 +22,8 @@ const OUTCOME_COLOR := {
 
 var _attacker_bar: ProgressBar
 var _defender_bar: ProgressBar
-var _attacker_icon: Panel
-var _defender_icon: Panel
+var _attacker_icon: Control
+var _defender_icon: Control
 var _attacker_rest_pos: Vector2
 var _defender_rest_pos: Vector2
 var _flash: ColorRect
@@ -73,8 +73,8 @@ func setup(entry: Dictionary) -> void:
 	clash_area.custom_minimum_size = Vector2(0, 56)
 	vbox.add_child(clash_area)
 
-	_attacker_icon = _make_icon(attacker_fdef.color)
-	_defender_icon = _make_icon(defender_fdef.color)
+	_attacker_icon = _make_icon(attacker_fdef)
+	_defender_icon = _make_icon(defender_fdef)
 	_attacker_rest_pos = Vector2(0, 4)
 	_defender_rest_pos = Vector2(456, 4)
 	_attacker_icon.position = _attacker_rest_pos
@@ -107,16 +107,32 @@ func setup(entry: Dictionary) -> void:
 
 	_play_clash()
 
-func _make_icon(color: Color) -> Panel:
-	var icon := Panel.new()
-	icon.size = Vector2(48, 48)
+func _make_icon(fdef: FactionDef) -> Control:
+	var wrapper := Control.new()
+	wrapper.size = Vector2(48, 48)
+
+	var bg := Panel.new()
+	bg.size = Vector2(48, 48)
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = color
+	sb.bg_color = fdef.color.darkened(0.35)
 	sb.border_color = Color.WHITE
 	sb.set_border_width_all(2)
 	sb.set_corner_radius_all(24)
-	icon.add_theme_stylebox_override("panel", sb)
-	return icon
+	bg.add_theme_stylebox_override("panel", sb)
+	wrapper.add_child(bg)
+
+	if fdef.emblem:
+		var emblem := TextureRect.new()
+		emblem.texture = fdef.emblem
+		# Without this, TextureRect uses the texture's native size (our SVGs
+		# are 128x128) as its minimum size and ignores .size entirely.
+		emblem.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		emblem.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		emblem.position = Vector2(6, 6)
+		emblem.size = Vector2(36, 36)
+		wrapper.add_child(emblem)
+
+	return wrapper
 
 func _build_side_row(parent: VBoxContainer, label_text: String, color: Color) -> ProgressBar:
 	var label := Label.new()

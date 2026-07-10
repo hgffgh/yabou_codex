@@ -1,6 +1,7 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://resources/faction_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/ui/emblems/aurelian_dominion.svg" id="2"]
 
 [resource]
 script = ExtResource("1")
@@ -13,3 +14,4 @@ starting_resources = 115
 tech_bonus = {"defense": 0.1}
 ai_aggression = 0.5
 starting_relations = {}
+emblem = ExtResource("2")

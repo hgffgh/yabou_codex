@@ -38,12 +38,18 @@ func _ready() -> void:
 		var fdef: FactionDef = GameState.faction_defs[fid]
 		var btn := Button.new()
 		btn.text = fdef.display_name
-		btn.custom_minimum_size = Vector2(200, 72)
+		btn.custom_minimum_size = Vector2(200, 96)
 		btn.toggle_mode = true
 		btn.add_theme_color_override("font_color", fdef.color)
 		btn.add_theme_color_override("font_hover_color", fdef.color)
 		btn.add_theme_color_override("font_pressed_color", fdef.color)
 		btn.add_theme_stylebox_override("pressed", UITheme.accent_style(fdef.color))
+		if fdef.emblem:
+			btn.icon = fdef.emblem
+			btn.expand_icon = true
+			btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+			btn.add_theme_constant_override("icon_max_width", 40)
 		btn.pressed.connect(_on_faction_selected.bind(fid))
 		faction_row.add_child(btn)
 		_faction_buttons[fid] = btn

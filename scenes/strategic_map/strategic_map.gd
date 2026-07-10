@@ -260,7 +260,11 @@ func _update_info_panel() -> void:
 		var udef: UnitType = GameState.unit_defs[uid]
 		if udef.tech_tier_required > 0:
 			continue
-		_production_option.add_item("%s (%d)" % [udef.display_name, udef.build_cost])
+		var label := "%s (%d)" % [udef.display_name, udef.build_cost]
+		if udef.icon:
+			_production_option.add_icon_item(udef.icon, label)
+		else:
+			_production_option.add_item(label)
 		_production_option.set_item_metadata(_production_option.item_count - 1, uid)
 	var can_produce := is_player_owned and orders_open and region.pending_production.is_empty()
 	_production_option.disabled = not can_produce

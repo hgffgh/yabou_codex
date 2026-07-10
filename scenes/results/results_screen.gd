@@ -120,11 +120,22 @@ func _build_row(entry: Dictionary, rank: int) -> Control:
 	rank_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(rank_label)
 
-	var swatch := Panel.new()
-	swatch.custom_minimum_size = Vector2(16, 16)
-	swatch.add_theme_stylebox_override("panel", UITheme.accent_style(fdef.color, 4))
 	var swatch_center := CenterContainer.new()
-	swatch_center.add_child(swatch)
+	swatch_center.custom_minimum_size = Vector2(28, 0)
+	if fdef.emblem:
+		var emblem := TextureRect.new()
+		emblem.custom_minimum_size = Vector2(24, 24)
+		emblem.texture = fdef.emblem
+		# Without this, TextureRect's own minimum size (from the 128x128
+		# source SVG) wins over custom_minimum_size and blows up the row.
+		emblem.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		emblem.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		swatch_center.add_child(emblem)
+	else:
+		var swatch := Panel.new()
+		swatch.custom_minimum_size = Vector2(16, 16)
+		swatch.add_theme_stylebox_override("panel", UITheme.accent_style(fdef.color, 4))
+		swatch_center.add_child(swatch)
 	row.add_child(swatch_center)
 
 	var name_label := Label.new()
