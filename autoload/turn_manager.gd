@@ -11,6 +11,10 @@ signal phase_changed(phase: Phase)
 ## shown one at a time; AI-vs-AI battles never emit this (resolved silently).
 signal battle_ready_for_vignette(entry: Dictionary)
 signal vignette_dismissed
+## Short human-readable line about AI-vs-AI activity the player didn't see
+## a vignette for (world keeps moving even off-screen). Empty string means
+## nothing notable happened this turn.
+signal turn_events_ready(summary: String)
 
 var current_phase: Phase = Phase.INCOME
 var last_combat_log: Array = []  # this turn's auto-captures/battles, for logging/UI
@@ -39,6 +43,7 @@ func commit_turn() -> void:
 		if entry["type"] == "battle" and _involves_player(entry):
 			battle_ready_for_vignette.emit(entry)
 			await vignette_dismissed
+	turn_events_ready.emit(_build_world_events_summary())
 	_set_phase(Phase.DIPLOMACY)
 	_run_diplomacy_phase()
 	_set_phase(Phase.VICTORY_CHECK)
@@ -173,8 +178,27 @@ func _resolve_combat(region: Region, attacker_id: StringName, defender_id: Strin
 		"captured": result.region_captured,
 	})
 
+func _build_world_events_summary() -> String:
+	var lines: Array = []
+	for entry in last_combat_log:
+		var region_name: String = GameState.region_defs[entry["region_id"]].display_name
+		if entry["type"] == "auto_capture":
+			var fdef: FactionDef = GameState.faction_defs[entry["faction_id"]]
+			lines.append("%s が %s を無血占領しました。" % [fdef.display_name, region_name])
+		elif entry["type"] == "battle":
+			if _involves_player(entry):
+				continue  # the player already saw this one via the vignette
+			var attacker_fdef: FactionDef = GameState.faction_defs[entry["attacker_id"]]
+			var defender_fdef: FactionDef = GameState.faction_defs[entry["defender_id"]]
+			if entry["captured"]:
+				lines.append("%s が %s で %s を撃破し占領しました。" % [attacker_fdef.display_name, region_name, defender_fdef.display_name])
+			else:
+				lines.append("%s が %s で %s と交戦しましたが決着つかず。" % [attacker_fdef.display_name, region_name, defender_fdef.display_name])
+	return "\n".join(lines)
+
 func _run_diplomacy_phase() -> void:
-	pass  # Relation-score ticking/events land with AI/diplomacy work in M4.
+	Diplomacy.apply_combat_events(last_combat_log)
+	Diplomacy.tick_drift()
 
 func _run_victory_check() -> bool:
 	var alive := GameState.alive_faction_ids()

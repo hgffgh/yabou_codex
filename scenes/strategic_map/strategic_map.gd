@@ -32,6 +32,7 @@ func _ready() -> void:
 
 	TurnManager.phase_changed.connect(_on_phase_changed)
 	TurnManager.battle_ready_for_vignette.connect(_on_battle_ready_for_vignette)
+	TurnManager.turn_events_ready.connect(_on_turn_events_ready)
 	GameState.turn_advanced.connect(_on_turn_advanced)
 	GameState.region_ownership_changed.connect(_on_region_ownership_changed)
 	GameState.game_over.connect(_on_game_over)
@@ -330,6 +331,10 @@ func _on_battle_ready_for_vignette(entry: Dictionary) -> void:
 	add_child(vignette)
 	vignette.setup(entry)
 	vignette.dismissed.connect(func(): TurnManager.vignette_dismissed.emit())
+
+func _on_turn_events_ready(summary: String) -> void:
+	if not summary.is_empty():
+		_append_log(summary)
 
 func _on_phase_changed(_phase) -> void:
 	_update_turn_ui()
