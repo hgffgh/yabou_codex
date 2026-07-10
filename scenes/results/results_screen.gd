@@ -11,10 +11,11 @@ const REASON_TEXT := {
 }
 
 func _ready() -> void:
+	theme = UITheme.get_theme()
 	UIUtils.fill_parent(self)
 
 	var bg := ColorRect.new()
-	bg.color = Color(0.07, 0.09, 0.14)
+	bg.color = UITheme.COLOR_BG
 	add_child(bg)
 	UIUtils.fill_parent(bg)
 
@@ -22,25 +23,34 @@ func _ready() -> void:
 	add_child(center)
 	UIUtils.fill_parent(center)
 
+	var card_width := 560.0
+	var standings := _build_standings()
+	var card_height := 220.0 + standings.size() * 44.0
+
+	var card := UITheme.make_card(Vector2(card_width, card_height))
+	center.add_child(card)
+
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
-	center.add_child(vbox)
+	vbox.add_theme_constant_override("separation", 12)
+	vbox.position = Vector2(28, 24)
+	vbox.size = Vector2(card_width - 56, card_height - 48)
+	card.add_child(vbox)
 
 	var title := Label.new()
 	title.text = "ゲーム終了"
-	title.add_theme_font_size_override("font_size", 34)
+	title.add_theme_font_size_override("font_size", 32)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
 	var reason_label := Label.new()
 	var reason_text: String = REASON_TEXT.get(GameState.last_game_over_reason, GameState.last_game_over_reason)
 	reason_label.text = "%s（ターン %d / %d）" % [reason_text, GameState.turn_number, GameState.campaign_config.turn_cap]
+	reason_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	reason_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(reason_label)
 
 	vbox.add_child(HSeparator.new())
 
-	var standings := _build_standings()
 	if standings.is_empty():
 		var none_label := Label.new()
 		none_label.text = "生存している勢力はありません。"
@@ -59,13 +69,13 @@ func _ready() -> void:
 
 	var play_again := Button.new()
 	play_again.text = "もう一度プレイ"
-	play_again.custom_minimum_size = Vector2(200, 44)
+	play_again.custom_minimum_size = Vector2(200, 46)
 	play_again.pressed.connect(func(): SceneRouter.goto_faction_setup())
 	button_row.add_child(play_again)
 
 	var main_menu_button := Button.new()
 	main_menu_button.text = "メインメニュー"
-	main_menu_button.custom_minimum_size = Vector2(200, 44)
+	main_menu_button.custom_minimum_size = Vector2(200, 46)
 	main_menu_button.pressed.connect(func(): SceneRouter.goto_main_menu())
 	button_row.add_child(main_menu_button)
 
@@ -86,26 +96,47 @@ func _build_standings() -> Array:
 	result.sort_custom(func(a, b): return a["score"] > b["score"])
 	return result
 
-func _build_row(entry: Dictionary, rank: int) -> HBoxContainer:
+func _build_row(entry: Dictionary, rank: int) -> Control:
 	var fdef: FactionDef = GameState.faction_defs[entry["faction_id"]]
+	var is_player: bool = entry["faction_id"] == GameState.player_faction_id
+
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(0, 36)
+
+	if is_player:
+		var highlight := Panel.new()
+		highlight.add_theme_stylebox_override("panel", UITheme.accent_style(fdef.color, 6))
+		wrapper.add_child(highlight)
+		UIUtils.fill_parent(highlight)
+
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
+	wrapper.add_child(row)
+	UIUtils.fill_parent(row)
 
 	var rank_label := Label.new()
 	rank_label.text = "%d位" % rank
-	rank_label.custom_minimum_size = Vector2(50, 0)
+	rank_label.custom_minimum_size = Vector2(46, 0)
+	rank_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(rank_label)
 
+	var swatch := Panel.new()
+	swatch.custom_minimum_size = Vector2(16, 16)
+	swatch.add_theme_stylebox_override("panel", UITheme.accent_style(fdef.color, 4))
+	var swatch_center := CenterContainer.new()
+	swatch_center.add_child(swatch)
+	row.add_child(swatch_center)
+
 	var name_label := Label.new()
-	name_label.text = fdef.display_name
-	if entry["faction_id"] == GameState.player_faction_id:
-		name_label.text += "（あなた）"
-	name_label.add_theme_color_override("font_color", fdef.color)
-	name_label.custom_minimum_size = Vector2(260, 0)
+	name_label.text = fdef.display_name + ("（あなた）" if is_player else "")
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_label.custom_minimum_size = Vector2(280, 0)
 	row.add_child(name_label)
 
 	var score_label := Label.new()
 	score_label.text = "スコア %d" % int(entry["score"])
+	score_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	score_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(score_label)
 
-	return row
+	return wrapper

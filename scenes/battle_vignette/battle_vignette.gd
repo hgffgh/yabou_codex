@@ -1,9 +1,9 @@
 class_name BattleVignette
 extends CanvasLayer
 ## Short, skippable presentation of a CombatResolver result that already
-## happened — the bars animate toward a precomputed end state, they never
-## decide anything themselves. Built entirely in code, same pattern as the
-## other screens (see UIUtils.fill_parent for why).
+## happened. Two faction icons slide together and flash on impact, then the
+## HP bars animate to their precomputed end state — none of this decides
+## anything, it only shows what CombatResolver already computed.
 
 signal dismissed
 
@@ -13,12 +13,23 @@ const OUTCOME_TEXT := {
 	2: "膠着",      # STALEMATE
 	3: "敗北",      # DEFEAT
 }
+const OUTCOME_COLOR := {
+	0: Color(0.55, 0.85, 0.55),
+	1: Color(0.78, 0.85, 0.55),
+	2: Color(0.80, 0.78, 0.55),
+	3: Color(0.90, 0.45, 0.45),
+}
 
 var _attacker_bar: ProgressBar
 var _defender_bar: ProgressBar
+var _attacker_icon: Panel
+var _defender_icon: Panel
+var _attacker_rest_pos: Vector2
+var _defender_rest_pos: Vector2
+var _flash: ColorRect
 var _outcome_label: Label
 var _skip_button: Button
-var _tween: Tween
+var _active_tween: Tween
 var _entry: Dictionary
 
 func setup(entry: Dictionary) -> void:
@@ -26,11 +37,12 @@ func setup(entry: Dictionary) -> void:
 	layer = 10  # above the map's own CanvasLayer (default layer 1)
 
 	var root := Control.new()
+	root.theme = UITheme.get_theme()
 	add_child(root)
 	UIUtils.fill_parent(root)
 
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.6)
+	dim.color = Color(0, 0, 0, 0.65)
 	root.add_child(dim)
 	UIUtils.fill_parent(dim)
 
@@ -38,19 +50,13 @@ func setup(entry: Dictionary) -> void:
 	root.add_child(center)
 	UIUtils.fill_parent(center)
 
-	var card := Control.new()
-	card.custom_minimum_size = Vector2(560, 320)
+	var card := UITheme.make_card(Vector2(560, 340))
 	center.add_child(card)
 
-	var card_bg := ColorRect.new()
-	card_bg.color = Color(0.08, 0.08, 0.11, 0.98)
-	card.add_child(card_bg)
-	UIUtils.fill_parent(card_bg)
-
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
-	vbox.position = Vector2(24, 20)
-	vbox.size = Vector2(512, 280)
+	vbox.add_theme_constant_override("separation", 12)
+	vbox.position = Vector2(28, 22)
+	vbox.size = Vector2(504, 296)
 	card.add_child(vbox)
 
 	var region_name: String = GameState.region_defs[entry["region_id"]].display_name
@@ -62,6 +68,25 @@ func setup(entry: Dictionary) -> void:
 
 	var attacker_fdef: FactionDef = GameState.faction_defs[entry["attacker_id"]]
 	var defender_fdef: FactionDef = GameState.faction_defs[entry["defender_id"]]
+
+	var clash_area := Control.new()
+	clash_area.custom_minimum_size = Vector2(0, 56)
+	vbox.add_child(clash_area)
+
+	_attacker_icon = _make_icon(attacker_fdef.color)
+	_defender_icon = _make_icon(defender_fdef.color)
+	_attacker_rest_pos = Vector2(0, 4)
+	_defender_rest_pos = Vector2(456, 4)
+	_attacker_icon.position = _attacker_rest_pos
+	_defender_icon.position = _defender_rest_pos
+	clash_area.add_child(_attacker_icon)
+	clash_area.add_child(_defender_icon)
+
+	_flash = ColorRect.new()
+	_flash.color = Color(1, 1, 1, 0.0)
+	_flash.size = Vector2(48, 48)
+	_flash.position = Vector2(228, 4)
+	clash_area.add_child(_flash)
 
 	_attacker_bar = _build_side_row(vbox, "攻撃: " + attacker_fdef.display_name, attacker_fdef.color)
 	_defender_bar = _build_side_row(vbox, "防御: " + defender_fdef.display_name, defender_fdef.color)
@@ -80,7 +105,18 @@ func setup(entry: Dictionary) -> void:
 	_skip_button.pressed.connect(_on_skip_pressed)
 	button_center.add_child(_skip_button)
 
-	_play()
+	_play_clash()
+
+func _make_icon(color: Color) -> Panel:
+	var icon := Panel.new()
+	icon.size = Vector2(48, 48)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.border_color = Color.WHITE
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(24)
+	icon.add_theme_stylebox_override("panel", sb)
+	return icon
 
 func _build_side_row(parent: VBoxContainer, label_text: String, color: Color) -> ProgressBar:
 	var label := Label.new()
@@ -93,20 +129,38 @@ func _build_side_row(parent: VBoxContainer, label_text: String, color: Color) ->
 	bar.max_value = 1.0
 	bar.value = 1.0
 	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(0, 24)
+	bar.custom_minimum_size = Vector2(0, 22)
 	parent.add_child(bar)
 	return bar
 
-func _play() -> void:
+func _play_clash() -> void:
+	var attacker_target := Vector2(204, 4)
+	var defender_target := Vector2(252, 4)
+
+	_active_tween = create_tween()
+	_active_tween.tween_property(_attacker_icon, "position", attacker_target, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_active_tween.parallel().tween_property(_defender_icon, "position", defender_target, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_active_tween.tween_callback(_flash_impact)
+	_active_tween.tween_interval(0.1)
+	_active_tween.tween_property(_attacker_icon, "position", _attacker_rest_pos, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_active_tween.parallel().tween_property(_defender_icon, "position", _defender_rest_pos, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_active_tween.tween_callback(_play_bars)
+
+func _flash_impact() -> void:
+	_flash.color = Color(1, 1, 1, 0.9)
+	var flash_tween := create_tween()
+	flash_tween.tween_property(_flash, "color:a", 0.0, 0.3)
+
+func _play_bars() -> void:
 	var attacker_before: int = max(_entry["attacker_before"], 1)
 	var defender_before: int = max(_entry["defender_before"], 1)
 	var attacker_fraction: float = float(_entry["attacker_after"]) / float(attacker_before)
 	var defender_fraction: float = float(_entry["defender_after"]) / float(defender_before)
 
-	_tween = create_tween()
-	_tween.tween_property(_attacker_bar, "value", attacker_fraction, 1.2)
-	_tween.parallel().tween_property(_defender_bar, "value", defender_fraction, 1.2)
-	_tween.tween_callback(_show_outcome)
+	_active_tween = create_tween()
+	_active_tween.tween_property(_attacker_bar, "value", attacker_fraction, 1.0)
+	_active_tween.parallel().tween_property(_defender_bar, "value", defender_fraction, 1.0)
+	_active_tween.tween_callback(_show_outcome)
 
 func _show_outcome() -> void:
 	var outcome: int = _entry["outcome"]
@@ -115,12 +169,19 @@ func _show_outcome() -> void:
 		var attacker_fdef: FactionDef = GameState.faction_defs[_entry["attacker_id"]]
 		text += "  ｜  %s が占領" % attacker_fdef.display_name
 	_outcome_label.text = text
+	_outcome_label.add_theme_color_override("font_color", OUTCOME_COLOR.get(outcome, UITheme.COLOR_TEXT))
+
+func _snap_to_end_state() -> void:
+	_attacker_icon.position = _attacker_rest_pos
+	_defender_icon.position = _defender_rest_pos
+	_flash.color = Color(1, 1, 1, 0.0)
+	_attacker_bar.value = float(_entry["attacker_after"]) / float(max(_entry["attacker_before"], 1))
+	_defender_bar.value = float(_entry["defender_after"]) / float(max(_entry["defender_before"], 1))
 
 func _on_skip_pressed() -> void:
-	if _tween and _tween.is_running():
-		_tween.kill()
-		_attacker_bar.value = float(_entry["attacker_after"]) / float(max(_entry["attacker_before"], 1))
-		_defender_bar.value = float(_entry["defender_after"]) / float(max(_entry["defender_before"], 1))
+	if _active_tween and _active_tween.is_running():
+		_active_tween.kill()
+		_snap_to_end_state()
 		_show_outcome()
 		return
 	dismissed.emit()

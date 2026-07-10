@@ -110,6 +110,10 @@ func _refresh_all_region_colors() -> void:
 		var region: Region = GameState.regions[region_id]
 		_region_views[region_id].set_owner_color(_color_for_owner(region.owner_faction_id))
 
+func _refresh_all_region_badges() -> void:
+	for region_id in _region_views:
+		_region_views[region_id].update_unit_badge()
+
 func _on_region_ownership_changed(region_id: StringName, _old, _new) -> void:
 	if _region_views.has(region_id):
 		_region_views[region_id].set_owner_color(_color_for_owner(GameState.get_region(region_id).owner_faction_id))
@@ -128,71 +132,75 @@ func _build_ui_overlay() -> void:
 	add_child(layer)
 
 	var root := Control.new()
+	root.theme = UITheme.get_theme()
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(root)
 	UIUtils.fill_parent(root)
 
+	# Panel (not PanelContainer/ColorRect) so nothing auto-resizes these to
+	# fit their children and they still get the theme's rounded-corner card
+	# look — see UITheme.make_card for why Panel specifically.
+	var top_bar_card := UITheme.make_card(Vector2(560, 56))
+	top_bar_card.position = Vector2(20, 20)
+	root.add_child(top_bar_card)
+
 	var top_bar := HBoxContainer.new()
-	top_bar.mouse_filter = Control.MOUSE_FILTER_STOP
 	top_bar.add_theme_constant_override("separation", 20)
-	top_bar.position = Vector2(20, 20)
-	root.add_child(top_bar)
+	top_bar.position = Vector2(16, 8)
+	top_bar.size = Vector2(528, 40)
+	top_bar_card.add_child(top_bar)
 
 	_turn_label = Label.new()
 	_turn_label.add_theme_font_size_override("font_size", 20)
+	_turn_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top_bar.add_child(_turn_label)
 
 	_phase_label = Label.new()
+	_phase_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	_phase_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top_bar.add_child(_phase_label)
 
 	var end_turn_button := Button.new()
 	end_turn_button.text = "ターン終了"
-	end_turn_button.custom_minimum_size = Vector2(140, 40)
+	end_turn_button.custom_minimum_size = Vector2(120, 40)
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	top_bar.add_child(end_turn_button)
 
 	var menu_button := Button.new()
 	menu_button.text = "メインメニュー"
+	menu_button.custom_minimum_size = Vector2(120, 40)
 	menu_button.pressed.connect(func(): SceneRouter.goto_main_menu())
 	top_bar.add_child(menu_button)
 
-	# Plain Control (not PanelContainer) so nothing auto-resizes this to fit
-	# its children — a Container was silently overriding our explicit size
-	# to hug its content, leaving world-space region markers visible through
-	# the uncovered remainder of the panel's claimed rect.
-	var panel_width := 300.0
-	var panel_height := 420.0
-	var side_panel := Control.new()
+	var panel_width := 320.0
+	var panel_height := 440.0
+	var side_panel := UITheme.make_card(Vector2(panel_width, panel_height))
 	side_panel.position = Vector2(get_viewport_rect().size.x - panel_width - 20, 20)
-	side_panel.size = Vector2(panel_width, panel_height)
-	side_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(side_panel)
 
-	var side_bg := ColorRect.new()
-	side_bg.color = Color(0.1, 0.1, 0.13, 0.96)
-	side_panel.add_child(side_bg)
-	UIUtils.fill_parent(side_bg)
-
 	var info_panel := VBoxContainer.new()
-	info_panel.add_theme_constant_override("separation", 8)
-	info_panel.position = Vector2(12, 12)
-	info_panel.size = Vector2(panel_width - 24, panel_height - 24)
+	info_panel.add_theme_constant_override("separation", 10)
+	info_panel.position = Vector2(18, 18)
+	info_panel.size = Vector2(panel_width - 36, panel_height - 36)
 	side_panel.add_child(info_panel)
 
 	_region_name_label = Label.new()
-	_region_name_label.add_theme_font_size_override("font_size", 18)
+	_region_name_label.add_theme_font_size_override("font_size", 20)
 	info_panel.add_child(_region_name_label)
 
 	_region_owner_label = Label.new()
+	_region_owner_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	info_panel.add_child(_region_owner_label)
 
 	_region_yield_label = Label.new()
+	_region_yield_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	info_panel.add_child(_region_yield_label)
 
 	info_panel.add_child(HSeparator.new())
 
 	var produce_label := Label.new()
 	produce_label.text = "生産:"
+	produce_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	info_panel.add_child(produce_label)
 
 	_production_option = OptionButton.new()
@@ -207,6 +215,7 @@ func _build_ui_overlay() -> void:
 
 	var move_label := Label.new()
 	move_label.text = "艦隊派遣先:"
+	move_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	info_panel.add_child(move_label)
 
 	_move_option = OptionButton.new()
@@ -219,6 +228,7 @@ func _build_ui_overlay() -> void:
 
 	info_panel.add_child(HSeparator.new())
 	_log_label = Label.new()
+	_log_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	_log_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_log_label.custom_minimum_size = Vector2(280, 0)
 	info_panel.add_child(_log_label)
@@ -330,6 +340,7 @@ func _update_turn_ui() -> void:
 	if faction:
 		text += "  ｜  資源: %d" % faction.resources
 	_phase_label.text = text
+	_refresh_all_region_badges()
 
 func _append_log(text: String) -> void:
 	_log_label.text = text
