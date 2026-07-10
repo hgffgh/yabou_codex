@@ -124,6 +124,7 @@ func _build_regions_and_lines() -> void:
 		var region: Region = GameState.regions[region_id]
 		var view := RegionNodeView.new()
 		view.setup(region_id, region, _color_for_owner(region.owner_faction_id))
+		view.set_player_owned(region.owner_faction_id == GameState.player_faction_id)
 		view.region_clicked.connect(_on_region_clicked)
 		add_child(view)
 		_region_views[region_id] = view
@@ -143,6 +144,7 @@ func _refresh_all_region_colors() -> void:
 	for region_id in _region_views:
 		var region: Region = GameState.regions[region_id]
 		_region_views[region_id].set_owner_color(_color_for_owner(region.owner_faction_id))
+		_region_views[region_id].set_player_owned(region.owner_faction_id == GameState.player_faction_id)
 
 func _refresh_all_region_badges() -> void:
 	for region_id in _region_views:
@@ -150,7 +152,9 @@ func _refresh_all_region_badges() -> void:
 
 func _on_region_ownership_changed(region_id: StringName, _old, _new) -> void:
 	if _region_views.has(region_id):
-		_region_views[region_id].set_owner_color(_color_for_owner(GameState.get_region(region_id).owner_faction_id))
+		var owner_id: StringName = GameState.get_region(region_id).owner_faction_id
+		_region_views[region_id].set_owner_color(_color_for_owner(owner_id))
+		_region_views[region_id].set_player_owned(owner_id == GameState.player_faction_id)
 
 func _on_region_clicked(region_id: StringName) -> void:
 	if _selected_region_id != &"" and _region_views.has(_selected_region_id):
@@ -185,6 +189,41 @@ func _build_ui_overlay() -> void:
 	var top_bar := HBoxContainer.new()
 	top_bar.add_theme_constant_override("separation", 20)
 	top_bar_card.add_child(top_bar)
+
+	# Persistent "which one is me" indicator — the map's gold ownership
+	# ring answers this per-region, but this answers it at a glance without
+	# having to scan the map at all.
+	var player_fdef: FactionDef = GameState.faction_defs[GameState.player_faction_id]
+	var player_badge := HBoxContainer.new()
+	player_badge.add_theme_constant_override("separation", 8)
+	top_bar.add_child(player_badge)
+
+	if player_fdef.emblem:
+		var player_emblem_bg := Panel.new()
+		player_emblem_bg.custom_minimum_size = Vector2(28, 28)
+		var emblem_sb := StyleBoxFlat.new()
+		emblem_sb.bg_color = player_fdef.color.darkened(0.35)
+		emblem_sb.border_color = RegionNodeView.PLAYER_RING_COLOR
+		emblem_sb.set_border_width_all(2)
+		emblem_sb.set_corner_radius_all(14)
+		player_emblem_bg.add_theme_stylebox_override("panel", emblem_sb)
+		player_badge.add_child(player_emblem_bg)
+
+		var player_emblem := TextureRect.new()
+		player_emblem.texture = player_fdef.emblem
+		player_emblem.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		player_emblem.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		player_emblem.position = Vector2(3, 3)
+		player_emblem.size = Vector2(22, 22)
+		player_emblem_bg.add_child(player_emblem)
+
+	var player_name_label := Label.new()
+	player_name_label.text = "あなた: %s" % player_fdef.display_name
+	player_name_label.add_theme_color_override("font_color", player_fdef.color)
+	player_name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	player_badge.add_child(player_name_label)
+
+	top_bar.add_child(VSeparator.new())
 
 	_turn_label = Label.new()
 	_turn_label.add_theme_font_size_override("font_size", 20)

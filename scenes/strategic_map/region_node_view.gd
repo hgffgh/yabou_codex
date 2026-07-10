@@ -10,12 +10,14 @@ signal region_clicked(region_id: StringName)
 const RADIUS := 28.0
 const BADGE_RADIUS := 12.0
 const BADGE_OFFSET := Vector2(20, 20)
+const PLAYER_RING_COLOR := Color(1.0, 0.85, 0.25, 0.95)
 
 var region_id: StringName
 var region_ref: Region
 var fill_color: Color = Color.GRAY
 var is_selected: bool = false
 var is_hovered: bool = false
+var is_player_owned: bool = false
 
 var _badge_label: Label
 
@@ -63,6 +65,13 @@ func set_owner_color(color: Color) -> void:
 	fill_color = color
 	queue_redraw()
 
+## Gold ring around the marker, independent of faction color — the fastest
+## way to answer "which ones are mine?" at a glance across the whole map,
+## rather than having to remember/match your faction's specific hue.
+func set_player_owned(owned: bool) -> void:
+	is_player_owned = owned
+	queue_redraw()
+
 func set_selected(selected: bool) -> void:
 	is_selected = selected
 	queue_redraw()
@@ -96,6 +105,9 @@ func _on_area_input_event(_viewport: Node, event: InputEvent, _shape_idx: int) -
 func _draw() -> void:
 	if is_selected:
 		draw_circle(Vector2.ZERO, RADIUS + 8.0, Color(1, 1, 1, 0.12))
+
+	if is_player_owned:
+		draw_arc(Vector2.ZERO, RADIUS + 6.0, 0, TAU, 40, PLAYER_RING_COLOR, 3.0)
 
 	var draw_color := fill_color.lightened(0.15) if is_hovered else fill_color
 	draw_circle(Vector2.ZERO, RADIUS, draw_color)
