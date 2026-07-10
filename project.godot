@@ -23,6 +23,13 @@ SteamManager="*res://autoload/steam_manager.gd"
 SceneRouter="*res://autoload/scene_router.gd"
 AudioManager="*res://autoload/audio_manager.gd"
 
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

@@ -26,6 +26,7 @@ var _drag_start_cam: Vector2
 func _ready() -> void:
 	_build_camera()
 	_build_regions_and_lines()
+	_fit_camera_to_map()
 	_build_ui_overlay()
 
 	TurnManager.phase_changed.connect(_on_phase_changed)
@@ -40,18 +41,51 @@ func _ready() -> void:
 
 # ---------------- Camera ----------------
 
+const MIN_ZOOM := 0.3
+const MAX_ZOOM := 2.5
+
 func _build_camera() -> void:
 	_camera = Camera2D.new()
 	_camera.enabled = true
 	add_child(_camera)
 
+## Fits the whole region graph in view on load, regardless of window size —
+## at a fixed zoom of 1.0 the map (roughly 1100x1100 world units) simply
+## doesn't fit inside Godot's default 1152x648 window, clipping regions off
+## the top/right edge and behind the HUD panels. Called after regions exist.
+func _fit_camera_to_map() -> void:
+	if GameState.regions.is_empty():
+		return
+	var min_pos := Vector2(INF, INF)
+	var max_pos := Vector2(-INF, -INF)
+	for region in GameState.regions.values():
+		var pos: Vector2 = region.def.map_position
+		min_pos.x = min(min_pos.x, pos.x)
+		min_pos.y = min(min_pos.y, pos.y)
+		max_pos.x = max(max_pos.x, pos.x)
+		max_pos.y = max(max_pos.y, pos.y)
+
+	var margin := 100.0  # region radius + label text below it
+	min_pos -= Vector2(margin, margin)
+	max_pos += Vector2(margin, margin)
+	var map_size: Vector2 = max_pos - min_pos
+	var map_center: Vector2 = (min_pos + max_pos) / 2.0
+
+	var viewport_size := get_viewport_rect().size
+	var usable_height := viewport_size.y - 100.0  # leave room under the top bar
+	var target_zoom: float = clamp(min(viewport_size.x / map_size.x, usable_height / map_size.y), MIN_ZOOM, 1.0)
+
+	_zoom_level = target_zoom
+	_camera.zoom = Vector2(target_zoom, target_zoom)
+	_camera.position = map_center
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_zoom_level = clamp(_zoom_level * 0.9, 0.4, 2.5)
+			_zoom_level = clamp(_zoom_level * 0.9, MIN_ZOOM, MAX_ZOOM)
 			_camera.zoom = Vector2(_zoom_level, _zoom_level)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_zoom_level = clamp(_zoom_level * 1.1, 0.4, 2.5)
+			_zoom_level = clamp(_zoom_level * 1.1, MIN_ZOOM, MAX_ZOOM)
 			_camera.zoom = Vector2(_zoom_level, _zoom_level)
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = event.pressed
@@ -139,15 +173,17 @@ func _build_ui_overlay() -> void:
 
 	# Panel (not PanelContainer/ColorRect) so nothing auto-resizes these to
 	# fit their children and they still get the theme's rounded-corner card
-	# look — see UITheme.make_card for why Panel specifically.
-	var top_bar_card := UITheme.make_card(Vector2(560, 56))
+	# look — see UITheme.make_card for why Panel specifically. The card is
+	# sized AFTER top_bar's children exist (via get_combined_minimum_size),
+	# not guessed up front — a guessed fixed width previously ran narrower
+	# than the actual Japanese label + two buttons, so "メインメニュー"
+	# rendered past the card's right edge at smaller window sizes.
+	var top_bar_card := UITheme.make_card(Vector2.ZERO)
 	top_bar_card.position = Vector2(20, 20)
 	root.add_child(top_bar_card)
 
 	var top_bar := HBoxContainer.new()
 	top_bar.add_theme_constant_override("separation", 20)
-	top_bar.position = Vector2(16, 8)
-	top_bar.size = Vector2(528, 40)
 	top_bar_card.add_child(top_bar)
 
 	_turn_label = Label.new()
@@ -168,9 +204,14 @@ func _build_ui_overlay() -> void:
 
 	var menu_button := Button.new()
 	menu_button.text = "メインメニュー"
-	menu_button.custom_minimum_size = Vector2(120, 40)
+	menu_button.custom_minimum_size = Vector2(140, 40)
 	menu_button.pressed.connect(func(): SceneRouter.goto_main_menu())
 	top_bar.add_child(menu_button)
+
+	var top_bar_margin := Vector2(16, 8)
+	top_bar.position = top_bar_margin
+	top_bar.size = top_bar.get_combined_minimum_size()
+	top_bar_card.size = top_bar.size + top_bar_margin * 2
 
 	var panel_width := 320.0
 	var panel_height := 440.0
