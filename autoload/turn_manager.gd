@@ -15,9 +15,41 @@ signal vignette_dismissed
 ## a vignette for (world keeps moving even off-screen). Empty string means
 ## nothing notable happened this turn.
 signal turn_events_ready(summary: String)
+signal research_completed(faction_id: StringName, new_tier: int)
 
 var current_phase: Phase = Phase.INCOME
 var last_combat_log: Array = []  # this turn's auto-captures/battles, for logging/UI
+
+## Global "development" command (per the original series' overall-menu
+## research command, not a per-region build item). Returns false if the
+## faction can't research right now (already researching, maxed out, or
+## can't afford it) without changing any state.
+func start_research(faction_id: StringName) -> bool:
+	var faction: Faction = GameState.get_faction(faction_id)
+	if faction == null or faction.research_in_progress:
+		return false
+	var config: CampaignConfig = GameState.campaign_config
+	if faction.tech_tier >= config.research_costs.size():
+		return false
+	var cost: int = config.research_costs[faction.tech_tier]
+	if faction.resources < cost:
+		return false
+	faction.resources -= cost
+	faction.research_in_progress = true
+	faction.research_turns_remaining = config.research_turns[faction.tech_tier]
+	return true
+
+func _advance_research() -> void:
+	var config: CampaignConfig = GameState.campaign_config
+	for fid in GameState.factions:
+		var faction: Faction = GameState.factions[fid]
+		if not faction.research_in_progress:
+			continue
+		faction.research_turns_remaining -= 1
+		if faction.research_turns_remaining <= 0:
+			faction.tech_tier += 1
+			faction.research_in_progress = false
+			research_completed.emit(fid, faction.tech_tier)
 
 func start_new_game(player_faction_id: StringName) -> void:
 	GameState.start_new_game(player_faction_id)
@@ -67,6 +99,7 @@ func _run_income_phase() -> void:
 		var faction: Faction = GameState.get_faction(region.owner_faction_id)
 		if faction:
 			faction.resources += region.def.resource_yield
+	_advance_research()
 
 ## Every queued job builds in parallel, each ticking down on its own
 ## build_time_turns clock independently — a region with 3 units queued at

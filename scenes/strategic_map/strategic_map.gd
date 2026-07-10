@@ -249,6 +249,12 @@ func _build_ui_overlay() -> void:
 	_phase_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top_bar.add_child(_phase_label)
 
+	var development_button := Button.new()
+	development_button.text = "開発"
+	development_button.custom_minimum_size = Vector2(90, 40)
+	development_button.pressed.connect(_on_development_pressed)
+	top_bar.add_child(development_button)
+
 	var end_turn_button := Button.new()
 	end_turn_button.text = "ターン終了"
 	end_turn_button.custom_minimum_size = Vector2(120, 40)
@@ -356,10 +362,11 @@ func _update_info_panel() -> void:
 	var is_player_owned := region.owner_faction_id == GameState.player_faction_id
 	var orders_open := TurnManager.current_phase == TurnManager.Phase.ORDERS
 
+	var player_faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	_production_option.clear()
 	for uid in GameState.unit_defs:
 		var udef: UnitType = GameState.unit_defs[uid]
-		if udef.tech_tier_required > 0:
+		if udef.tech_tier_required > player_faction.tech_tier:
 			continue
 		var label := "%s (%d・%dターン)" % [udef.display_name, udef.build_cost, udef.build_time_turns]
 		if udef.icon:
@@ -432,6 +439,13 @@ func _on_end_turn_pressed() -> void:
 	if GameState.is_game_over:
 		return
 	TurnManager.commit_turn()
+
+func _on_development_pressed() -> void:
+	if GameState.is_game_over:
+		return
+	var panel := DevelopmentPanel.new()
+	add_child(panel)
+	panel.setup(GameState.player_faction_id)
 
 func _on_battle_ready_for_vignette(entry: Dictionary) -> void:
 	var vignette := BattleVignette.new()

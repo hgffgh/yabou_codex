@@ -1,0 +1,20 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://resources/unit_type.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/units/battlecruiser.svg" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"battlecruiser"
+display_name = "重巡戦艦"
+domain = "Space"
+build_cost = 60
+build_time_turns = 3
+attack = 14
+defense = 11
+hp = 45
+move_range = 1
+tech_tier_required = 1
+terrain_bonus = {}
+icon = ExtResource("2")
+vignette_sprite = ExtResource("2")

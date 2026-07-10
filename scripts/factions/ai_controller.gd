@@ -10,6 +10,7 @@ static func decide_orders(faction_id: StringName) -> void:
 	var faction: Faction = GameState.get_faction(faction_id)
 	if faction == null:
 		return
+	_decide_research(faction_id, faction)
 	for region in GameState.regions.values():
 		if region.owner_faction_id != faction_id:
 			continue
@@ -17,26 +18,48 @@ static func decide_orders(faction_id: StringName) -> void:
 		_decide_movement(faction_id, faction, region)
 
 const MAX_QUEUE_LENGTH := 3  # keep the AI's production responsive to the battlefield rather than committing resources many turns ahead
+const RESEARCH_RESERVE := 40  # only research if this much would still be left over for production
+
+## Opportunistic: research whenever affordable with a comfortable buffer
+## left over, rather than always saving for it or never bothering — a
+## faction that's flush with income naturally starts climbing tiers.
+static func _decide_research(faction_id: StringName, faction: Faction) -> void:
+	if faction.research_in_progress:
+		return
+	var config: CampaignConfig = GameState.campaign_config
+	if faction.tech_tier >= config.research_costs.size():
+		return
+	var cost: int = config.research_costs[faction.tech_tier]
+	if faction.resources >= cost + RESEARCH_RESERVE:
+		TurnManager.start_research(faction_id)
 
 static func _decide_production(faction: Faction, region: Region) -> void:
 	if region.pending_production.size() >= MAX_QUEUE_LENGTH:
 		return
-	var cheapest := _cheapest_tier0_unit()
-	if cheapest != null and faction.resources >= cheapest.build_cost:
-		faction.resources -= cheapest.build_cost
+	var best := _best_affordable_unit(faction)
+	if best != null:
+		faction.resources -= best.build_cost
 		region.pending_production.append({
-			"unit_type_id": cheapest.id,
-			"turns_remaining": cheapest.build_time_turns,
+			"unit_type_id": best.id,
+			"turns_remaining": best.build_time_turns,
 		})
 
-static func _cheapest_tier0_unit() -> UnitType:
-	var cheapest: UnitType = null
+## Picks the strongest (attack+defense) unit the faction can both afford
+## and has researched, not just the cheapest — otherwise researching
+## higher tiers would never actually change what the AI builds.
+static func _best_affordable_unit(faction: Faction) -> UnitType:
+	var best: UnitType = null
+	var best_power := -1
 	for unit_type in GameState.unit_defs.values():
-		if unit_type.tech_tier_required > 0:
+		if unit_type.tech_tier_required > faction.tech_tier:
 			continue
-		if cheapest == null or unit_type.build_cost < cheapest.build_cost:
-			cheapest = unit_type
-	return cheapest
+		if unit_type.build_cost > faction.resources:
+			continue
+		var power: int = unit_type.attack + unit_type.defense
+		if power > best_power:
+			best_power = power
+			best = unit_type
+	return best
 
 static func _decide_movement(faction_id: StringName, faction: Faction, region: Region) -> void:
 	if region.def.is_capital_slot:
