@@ -18,6 +18,8 @@ var factions: Dictionary = {}  # StringName -> Faction
 var regions: Dictionary = {}   # StringName -> Region
 var player_faction_id: StringName = &""
 var is_game_over: bool = false
+var last_game_over_reason: String = ""
+var last_game_over_standings: Array = []
 
 func _ready() -> void:
 	_load_static_data()
@@ -79,6 +81,19 @@ func set_region_owner(region_id: StringName, new_owner_id: StringName) -> void:
 		return
 	region.owner_faction_id = new_owner_id
 	region_ownership_changed.emit(region_id, old_owner, new_owner_id)
+	_check_capital_loss(region_id, old_owner)
+
+## A faction is eliminated the moment it no longer holds its own designated
+## capital region — losing someone else's captured capital doesn't count.
+func _check_capital_loss(region_id: StringName, old_owner: StringName) -> void:
+	if old_owner == &"":
+		return
+	var faction: Faction = factions.get(old_owner)
+	if faction == null or faction.eliminated:
+		return
+	if faction.def.starting_region_id == region_id:
+		faction.eliminated = true
+		faction_eliminated.emit(old_owner)
 
 func region_count_for(faction_id: StringName) -> int:
 	var count := 0

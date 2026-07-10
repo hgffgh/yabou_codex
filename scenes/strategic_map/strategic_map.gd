@@ -17,8 +17,6 @@ var _produce_button: Button
 var _move_option: OptionButton
 var _move_button: Button
 var _log_label: Label
-var _game_over_box: CenterContainer
-var _game_over_label: Label
 
 var _zoom_level: float = 1.0
 var _dragging: bool = false
@@ -225,26 +223,6 @@ func _build_ui_overlay() -> void:
 	_log_label.custom_minimum_size = Vector2(280, 0)
 	info_panel.add_child(_log_label)
 
-	_game_over_box = CenterContainer.new()
-	_game_over_box.visible = false
-	_game_over_box.mouse_filter = Control.MOUSE_FILTER_STOP
-	root.add_child(_game_over_box)
-	UIUtils.fill_parent(_game_over_box)
-
-	var game_over_vbox := VBoxContainer.new()
-	game_over_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	_game_over_box.add_child(game_over_vbox)
-
-	_game_over_label = Label.new()
-	_game_over_label.add_theme_font_size_override("font_size", 28)
-	_game_over_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	game_over_vbox.add_child(_game_over_label)
-
-	var back_to_menu := Button.new()
-	back_to_menu.text = "メインメニュー"
-	back_to_menu.pressed.connect(func(): SceneRouter.goto_main_menu())
-	game_over_vbox.add_child(back_to_menu)
-
 func _update_info_panel() -> void:
 	if _selected_region_id == &"":
 		_region_name_label.text = "領域が選択されていません"
@@ -356,14 +334,5 @@ func _update_turn_ui() -> void:
 func _append_log(text: String) -> void:
 	_log_label.text = text
 
-func _on_game_over(reason: String, standings: Array) -> void:
-	var reason_names := {"turn_cap": "ターン上限", "region_threshold": "領域制圧"}
-	var text := "ゲーム終了（%s）\n" % reason_names.get(reason, reason)
-	if reason == "region_threshold":
-		text += "%s が領域制圧により勝利しました！" % GameState.faction_defs[standings[0]["faction_id"]].display_name
-	else:
-		text += "最終順位:\n"
-		for entry in standings:
-			text += "%s - スコア %d\n" % [GameState.faction_defs[entry["faction_id"]].display_name, entry["score"]]
-	_game_over_label.text = text
-	_game_over_box.visible = true
+func _on_game_over(_reason: String, _standings: Array) -> void:
+	SceneRouter.goto_results()

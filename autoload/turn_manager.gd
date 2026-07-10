@@ -201,7 +201,18 @@ func _run_diplomacy_phase() -> void:
 	Diplomacy.tick_drift()
 
 func _run_victory_check() -> bool:
+	var player_faction: Faction = GameState.get_faction(GameState.player_faction_id)
+	if player_faction and player_faction.eliminated:
+		_end_game("player_eliminated", [])
+		return true
+
 	var alive := GameState.alive_faction_ids()
+	if alive.size() <= 1:
+		var winner_id: StringName = alive[0] if alive.size() == 1 else &""
+		var standings: Array = [{"faction_id": winner_id, "score": -1}] if winner_id != &"" else []
+		_end_game("capital_capture", standings)
+		return true
+
 	var total_regions := GameState.regions.size()
 	for fid in alive:
 		var pct := float(GameState.region_count_for(fid)) / float(total_regions)
@@ -224,4 +235,6 @@ func _score_standings(faction_ids: Array) -> Array:
 
 func _end_game(reason: String, standings: Array) -> void:
 	GameState.is_game_over = true
+	GameState.last_game_over_reason = reason
+	GameState.last_game_over_standings = standings
 	GameState.game_over.emit(reason, standings)
