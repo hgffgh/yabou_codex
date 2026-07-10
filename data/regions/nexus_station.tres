@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"nexus_station"
-display_name = "Nexus Station"
+display_name = "ネクサス・ステーション"
 map_position = Vector2(0, 0)
 neighbor_ids = Array[StringName]([&"sc_border", &"ks_border", &"uc_border", &"ad_border"])
 terrain_type = &"deep_space_relay"

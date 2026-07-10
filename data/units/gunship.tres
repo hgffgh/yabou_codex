@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"gunship"
-display_name = "Gunship"
+display_name = "砲艦"
 domain = "Space"
 build_cost = 15
 build_time_turns = 1

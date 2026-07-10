@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"ad_interior_b"
-display_name = "Aurelian Dominion Outpost"
+display_name = "アウレリアン専制前哨基地"
 map_position = Vector2(-350, 150)
 neighbor_ids = Array[StringName]([&"ad_capital", &"ad_border"])
 terrain_type = &"shipyard_belt"

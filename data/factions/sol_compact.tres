@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"sol_compact"
-display_name = "Sol Compact"
+display_name = "ソル協約"
 color = Color(0.35, 0.55, 0.95, 1)
 is_ai_controlled = true
 starting_region_id = &"sc_capital"

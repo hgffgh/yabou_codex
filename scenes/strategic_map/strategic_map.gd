@@ -146,13 +146,13 @@ func _build_ui_overlay() -> void:
 	top_bar.add_child(_phase_label)
 
 	var end_turn_button := Button.new()
-	end_turn_button.text = "End Turn"
+	end_turn_button.text = "ターン終了"
 	end_turn_button.custom_minimum_size = Vector2(140, 40)
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	top_bar.add_child(end_turn_button)
 
 	var menu_button := Button.new()
-	menu_button.text = "Main Menu"
+	menu_button.text = "メインメニュー"
 	menu_button.pressed.connect(func(): SceneRouter.goto_main_menu())
 	top_bar.add_child(menu_button)
 
@@ -192,28 +192,28 @@ func _build_ui_overlay() -> void:
 	info_panel.add_child(HSeparator.new())
 
 	var produce_label := Label.new()
-	produce_label.text = "Produce:"
+	produce_label.text = "生産:"
 	info_panel.add_child(produce_label)
 
 	_production_option = OptionButton.new()
 	info_panel.add_child(_production_option)
 
 	_produce_button = Button.new()
-	_produce_button.text = "Queue Production"
+	_produce_button.text = "生産を予約"
 	_produce_button.pressed.connect(_on_produce_pressed)
 	info_panel.add_child(_produce_button)
 
 	info_panel.add_child(HSeparator.new())
 
 	var move_label := Label.new()
-	move_label.text = "Send Fleet To:"
+	move_label.text = "艦隊派遣先:"
 	info_panel.add_child(move_label)
 
 	_move_option = OptionButton.new()
 	info_panel.add_child(_move_option)
 
 	_move_button = Button.new()
-	_move_button.text = "Order Move"
+	_move_button.text = "移動命令"
 	_move_button.pressed.connect(_on_move_pressed)
 	info_panel.add_child(_move_button)
 
@@ -239,13 +239,13 @@ func _build_ui_overlay() -> void:
 	game_over_vbox.add_child(_game_over_label)
 
 	var back_to_menu := Button.new()
-	back_to_menu.text = "Main Menu"
+	back_to_menu.text = "メインメニュー"
 	back_to_menu.pressed.connect(func(): SceneRouter.goto_main_menu())
 	game_over_vbox.add_child(back_to_menu)
 
 func _update_info_panel() -> void:
 	if _selected_region_id == &"":
-		_region_name_label.text = "No region selected"
+		_region_name_label.text = "領域が選択されていません"
 		_region_owner_label.text = ""
 		_region_yield_label.text = ""
 		_production_option.disabled = true
@@ -256,11 +256,11 @@ func _update_info_panel() -> void:
 
 	var region: Region = GameState.regions[_selected_region_id]
 	_region_name_label.text = region.def.display_name
-	var owner_name := "Unclaimed"
+	var owner_name := "未占領"
 	if region.owner_faction_id != &"":
 		owner_name = GameState.faction_defs[region.owner_faction_id].display_name
-	_region_owner_label.text = "Owner: %s" % owner_name
-	_region_yield_label.text = "Yield: %d/turn  |  Defense: +%d" % [region.def.resource_yield, region.def.defense_terrain_bonus]
+	_region_owner_label.text = "所有: %s" % owner_name
+	_region_yield_label.text = "産出: %d/ターン  ｜  防御: +%d" % [region.def.resource_yield, region.def.defense_terrain_bonus]
 
 	var is_player_owned := region.owner_faction_id == GameState.player_faction_id
 	var orders_open := TurnManager.current_phase == TurnManager.Phase.ORDERS
@@ -291,7 +291,7 @@ func _on_produce_pressed() -> void:
 		return
 	var region: Region = GameState.regions[_selected_region_id]
 	if not region.pending_production.is_empty():
-		_append_log("Region already has production queued.")
+		_append_log("この領域は既に生産を予約しています。")
 		return
 	var idx := _production_option.selected
 	if idx < 0:
@@ -300,11 +300,11 @@ func _on_produce_pressed() -> void:
 	var udef: UnitType = GameState.unit_defs[unit_id]
 	var faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	if faction.resources < udef.build_cost:
-		_append_log("Not enough resources for %s." % udef.display_name)
+		_append_log("%s を生産する資源が足りません。" % udef.display_name)
 		return
 	faction.resources -= udef.build_cost
 	region.pending_production.append({"unit_type_id": unit_id, "turns_remaining": udef.build_time_turns})
-	_append_log("Queued %s at %s." % [udef.display_name, region.def.display_name])
+	_append_log("%s で %s の生産を予約しました。" % [region.def.display_name, udef.display_name])
 	_update_info_panel()
 	_update_turn_ui()
 
@@ -317,7 +317,7 @@ func _on_move_pressed() -> void:
 		return
 	var dest_id: StringName = _move_option.get_item_metadata(idx)
 	region.pending_move_order = dest_id
-	_append_log("Fleet from %s ordered to %s." % [region.def.display_name, GameState.region_defs[dest_id].display_name])
+	_append_log("%s の艦隊に %s への移動を命令しました。" % [region.def.display_name, GameState.region_defs[dest_id].display_name])
 
 func _on_end_turn_pressed() -> void:
 	if GameState.is_game_over:
@@ -333,24 +333,25 @@ func _on_turn_advanced(_turn_number: int) -> void:
 	_refresh_all_region_colors()
 
 func _update_turn_ui() -> void:
-	_turn_label.text = "Turn %d / %d" % [GameState.turn_number, GameState.campaign_config.turn_cap]
-	var phase_names := ["Income", "Orders", "Movement", "Combat", "Diplomacy", "Victory Check"]
-	var text := "Phase: %s" % phase_names[TurnManager.current_phase]
+	_turn_label.text = "ターン %d / %d" % [GameState.turn_number, GameState.campaign_config.turn_cap]
+	var phase_names := ["収入", "命令", "移動", "戦闘", "外交", "勝利判定"]
+	var text := "フェーズ: %s" % phase_names[TurnManager.current_phase]
 	var faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	if faction:
-		text += "  |  Resources: %d" % faction.resources
+		text += "  ｜  資源: %d" % faction.resources
 	_phase_label.text = text
 
 func _append_log(text: String) -> void:
 	_log_label.text = text
 
 func _on_game_over(reason: String, standings: Array) -> void:
-	var text := "Game Over (%s)\n" % reason
+	var reason_names := {"turn_cap": "ターン上限", "region_threshold": "領域制圧"}
+	var text := "ゲーム終了（%s）\n" % reason_names.get(reason, reason)
 	if reason == "region_threshold":
-		text += "%s wins by regional dominance!" % GameState.faction_defs[standings[0]["faction_id"]].display_name
+		text += "%s が領域制圧により勝利しました！" % GameState.faction_defs[standings[0]["faction_id"]].display_name
 	else:
-		text += "Final standings:\n"
+		text += "最終順位:\n"
 		for entry in standings:
-			text += "%s - score %d\n" % [GameState.faction_defs[entry["faction_id"]].display_name, entry["score"]]
+			text += "%s - スコア %d\n" % [GameState.faction_defs[entry["faction_id"]].display_name, entry["score"]]
 	_game_over_label.text = text
 	_game_over_box.visible = true

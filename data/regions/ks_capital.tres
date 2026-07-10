@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"ks_capital"
-display_name = "Kessler Syndicate Capital"
+display_name = "ケスラー機工同盟首都"
 map_position = Vector2(500, 0)
 neighbor_ids = Array[StringName]([&"ks_interior_a", &"ks_interior_b"])
 terrain_type = &"core_world"

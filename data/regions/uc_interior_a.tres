@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"uc_interior_a"
-display_name = "Umbra Concord Shipyard"
+display_name = "アンブラ盟約造船所"
 map_position = Vector2(-150, 350)
 neighbor_ids = Array[StringName]([&"uc_capital", &"uc_border"])
 terrain_type = &"shipyard_belt"

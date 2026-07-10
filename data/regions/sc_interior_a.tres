@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"sc_interior_a"
-display_name = "Sol Compact Shipyard"
+display_name = "ソル協約造船所"
 map_position = Vector2(150, -350)
 neighbor_ids = Array[StringName]([&"sc_capital", &"sc_border"])
 terrain_type = &"shipyard_belt"

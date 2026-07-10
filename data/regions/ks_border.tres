@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"ks_border"
-display_name = "Kessler Syndicate Border Watch"
+display_name = "ケスラー機工同盟国境哨戒所"
 map_position = Vector2(200, 0)
 neighbor_ids = Array[StringName]([&"ks_interior_a", &"ks_interior_b", &"nexus_station", &"uc_border", &"sc_border"])
 terrain_type = &"border_zone"

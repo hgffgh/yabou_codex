@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"uc_border"
-display_name = "Umbra Concord Border Watch"
+display_name = "アンブラ盟約国境哨戒所"
 map_position = Vector2(0, 200)
 neighbor_ids = Array[StringName]([&"uc_interior_a", &"uc_interior_b", &"nexus_station", &"ad_border", &"ks_border"])
 terrain_type = &"border_zone"

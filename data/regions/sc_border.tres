@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"sc_border"
-display_name = "Sol Compact Border Watch"
+display_name = "ソル協約国境哨戒所"
 map_position = Vector2(0, -200)
 neighbor_ids = Array[StringName]([&"sc_interior_a", &"sc_interior_b", &"nexus_station", &"ks_border", &"ad_border"])
 terrain_type = &"border_zone"

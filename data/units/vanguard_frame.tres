@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"vanguard_frame"
-display_name = "Vanguard Frame"
+display_name = "先鋒フレーム"
 domain = "Ground"
 build_cost = 45
 build_time_turns = 2

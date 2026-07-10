@@ -24,7 +24,7 @@ func _ready() -> void:
 	margin.add_child(vbox)
 
 	var title := Label.new()
-	title.text = "Choose Your Faction"
+	title.text = "勢力を選択"
 	title.add_theme_font_size_override("font_size", 28)
 	vbox.add_child(title)
 
@@ -46,18 +46,18 @@ func _ready() -> void:
 		_faction_buttons[fid] = btn
 
 	_info_label = Label.new()
-	_info_label.text = "Select a faction to lead into the campaign."
+	_info_label.text = "キャンペーンで率いる勢力を選んでください。"
 	vbox.add_child(_info_label)
 
 	_begin_button = Button.new()
-	_begin_button.text = "Begin Campaign"
+	_begin_button.text = "キャンペーン開始"
 	_begin_button.custom_minimum_size = Vector2(220, 44)
 	_begin_button.disabled = true
 	_begin_button.pressed.connect(_on_begin_pressed)
 	vbox.add_child(_begin_button)
 
 	var back_button := Button.new()
-	back_button.text = "Back"
+	back_button.text = "戻る"
 	back_button.pressed.connect(func(): SceneRouter.goto_main_menu())
 	vbox.add_child(back_button)
 
@@ -67,7 +67,7 @@ func _on_faction_selected(fid: StringName) -> void:
 		_faction_buttons[other_id].button_pressed = other_id == fid
 	var fdef: FactionDef = GameState.faction_defs[fid]
 	var capital: RegionDef = GameState.region_defs[fdef.starting_region_id]
-	_info_label.text = "%s selected. Capital: %s" % [fdef.display_name, capital.display_name]
+	_info_label.text = "%s を選択しました。首都: %s" % [fdef.display_name, capital.display_name]
 	_begin_button.disabled = false
 
 func _on_begin_pressed() -> void:

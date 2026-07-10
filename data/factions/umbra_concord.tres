@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"umbra_concord"
-display_name = "Umbra Concord"
+display_name = "アンブラ盟約"
 color = Color(0.55, 0.25, 0.75, 1)
 is_ai_controlled = true
 starting_region_id = &"uc_capital"
