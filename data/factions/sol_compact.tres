@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/faction_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"sol_compact"
+display_name = "Sol Compact"
+color = Color(0.35, 0.55, 0.95, 1)
+is_ai_controlled = true
+starting_region_id = &"sc_capital"
+starting_resources = 120
+tech_bonus = {"attack": 0.0, "defense": 0.05}
+ai_aggression = 0.35
+starting_relations = {}

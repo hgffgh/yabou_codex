@@ -1,0 +1,17 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/unit_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"scout_frame"
+display_name = "Scout Frame"
+domain = "Space"
+build_cost = 8
+build_time_turns = 1
+attack = 2
+defense = 1
+hp = 8
+move_range = 2
+tech_tier_required = 0
+terrain_bonus = {}

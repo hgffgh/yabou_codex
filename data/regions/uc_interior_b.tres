@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/region_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"uc_interior_b"
+display_name = "Umbra Concord Outpost"
+map_position = Vector2(150, 350)
+neighbor_ids = Array[StringName]([&"uc_capital", &"uc_border"])
+terrain_type = &"shipyard_belt"
+resource_yield = 8
+is_capital_slot = false
+starting_owner_faction_id = &"umbra_concord"
+defense_terrain_bonus = 5

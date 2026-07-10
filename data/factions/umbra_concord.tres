@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/faction_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"umbra_concord"
+display_name = "Umbra Concord"
+color = Color(0.55, 0.25, 0.75, 1)
+is_ai_controlled = true
+starting_region_id = &"uc_capital"
+starting_resources = 110
+tech_bonus = {"attack": 0.1}
+ai_aggression = 0.6
+starting_relations = {}

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/unit_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"vanguard_frame"
+display_name = "Vanguard Frame"
+domain = "Ground"
+build_cost = 45
+build_time_turns = 2
+attack = 10
+defense = 8
+hp = 22
+move_range = 1
+tech_tier_required = 1
+terrain_bonus = {}

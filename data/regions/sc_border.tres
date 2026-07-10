@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/region_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"sc_border"
+display_name = "Sol Compact Border Watch"
+map_position = Vector2(0, -200)
+neighbor_ids = Array[StringName]([&"sc_interior_a", &"sc_interior_b", &"nexus_station", &"ks_border", &"ad_border"])
+terrain_type = &"border_zone"
+resource_yield = 6
+is_capital_slot = false
+starting_owner_faction_id = &"sol_compact"
+defense_terrain_bonus = 10

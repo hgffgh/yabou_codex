@@ -1,0 +1,8 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/campaign_config.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+turn_cap = 24
+victory_region_threshold_pct = 0.6

@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/region_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"ks_interior_a"
+display_name = "Kessler Syndicate Shipyard"
+map_position = Vector2(350, 150)
+neighbor_ids = Array[StringName]([&"ks_capital", &"ks_border"])
+terrain_type = &"shipyard_belt"
+resource_yield = 8
+is_capital_slot = false
+starting_owner_faction_id = &"kessler_syndicate"
+defense_terrain_bonus = 5

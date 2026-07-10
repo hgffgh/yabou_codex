@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/region_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"ad_border"
+display_name = "Aurelian Dominion Border Watch"
+map_position = Vector2(-200, 0)
+neighbor_ids = Array[StringName]([&"ad_interior_a", &"ad_interior_b", &"nexus_station", &"sc_border", &"uc_border"])
+terrain_type = &"border_zone"
+resource_yield = 6
+is_capital_slot = false
+starting_owner_faction_id = &"aurelian_dominion"
+defense_terrain_bonus = 10

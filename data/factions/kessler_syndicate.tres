@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/faction_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"kessler_syndicate"
+display_name = "Kessler Syndicate"
+color = Color(0.95, 0.6, 0.15, 1)
+is_ai_controlled = true
+starting_region_id = &"ks_capital"
+starting_resources = 130
+tech_bonus = {"production_cost": -0.1}
+ai_aggression = 0.55
+starting_relations = {}
