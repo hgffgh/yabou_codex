@@ -31,6 +31,7 @@ func _ready() -> void:
 	_build_ui_overlay()
 
 	TurnManager.phase_changed.connect(_on_phase_changed)
+	TurnManager.battle_ready_for_vignette.connect(_on_battle_ready_for_vignette)
 	GameState.turn_advanced.connect(_on_turn_advanced)
 	GameState.region_ownership_changed.connect(_on_region_ownership_changed)
 	GameState.game_over.connect(_on_game_over)
@@ -323,6 +324,12 @@ func _on_end_turn_pressed() -> void:
 	if GameState.is_game_over:
 		return
 	TurnManager.commit_turn()
+
+func _on_battle_ready_for_vignette(entry: Dictionary) -> void:
+	var vignette := BattleVignette.new()
+	add_child(vignette)
+	vignette.setup(entry)
+	vignette.dismissed.connect(func(): TurnManager.vignette_dismissed.emit())
 
 func _on_phase_changed(_phase) -> void:
 	_update_turn_ui()

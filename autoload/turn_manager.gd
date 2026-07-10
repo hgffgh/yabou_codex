@@ -6,8 +6,14 @@ extends Node
 enum Phase { INCOME, ORDERS, MOVEMENT, COMBAT, DIPLOMACY, VICTORY_CHECK }
 
 signal phase_changed(phase: Phase)
+## Emitted once per player-involved battle so the UI can play a vignette.
+## commit_turn() awaits vignette_dismissed before moving on, so battles are
+## shown one at a time; AI-vs-AI battles never emit this (resolved silently).
+signal battle_ready_for_vignette(entry: Dictionary)
+signal vignette_dismissed
 
 var current_phase: Phase = Phase.INCOME
+var last_combat_log: Array = []  # this turn's auto-captures/battles, for logging/UI
 
 func start_new_game(player_faction_id: StringName) -> void:
 	GameState.start_new_game(player_faction_id)
@@ -29,6 +35,10 @@ func commit_turn() -> void:
 	_run_movement_phase()
 	_set_phase(Phase.COMBAT)
 	_run_combat_phase()
+	for entry in last_combat_log:
+		if entry["type"] == "battle" and _involves_player(entry):
+			battle_ready_for_vignette.emit(entry)
+			await vignette_dismissed
 	_set_phase(Phase.DIPLOMACY)
 	_run_diplomacy_phase()
 	_set_phase(Phase.VICTORY_CHECK)
@@ -36,6 +46,9 @@ func commit_turn() -> void:
 		return
 	GameState.advance_turn()
 	_begin_turn()
+
+func _involves_player(entry: Dictionary) -> bool:
+	return entry["attacker_id"] == GameState.player_faction_id or entry["defender_id"] == GameState.player_faction_id
 
 func _set_phase(phase: Phase) -> void:
 	current_phase = phase
@@ -86,17 +99,79 @@ func _run_movement_phase() -> void:
 			source_stack.units.clear()
 
 func _run_combat_phase() -> void:
-	# CombatResolver lands in M3. For now just detect+log contested regions
-	# so the phase pipeline is fully exercised end-to-end ahead of that work.
+	last_combat_log = []
 	for region in GameState.regions.values():
-		if region.owner_faction_id == &"":
+		var occupants: Array = region.occupying_faction_ids()
+		if occupants.is_empty():
 			continue
+
 		var hostile_occupants: Array = []
-		for fid in region.occupying_faction_ids():
-			if fid != region.owner_faction_id and fid != &"":
+		for fid in occupants:
+			if fid != region.owner_faction_id:
 				hostile_occupants.append(fid)
-		if not hostile_occupants.is_empty():
-			print("TurnManager: %s contested by %s (combat resolution lands in M3)" % [region.def.display_name, hostile_occupants])
+		if hostile_occupants.is_empty():
+			continue
+
+		var attacker_id: StringName = _strongest_faction(hostile_occupants, region)
+
+		if region.owner_faction_id == &"":
+			var others: Array = []
+			for fid in hostile_occupants:
+				if fid != attacker_id:
+					others.append(fid)
+			if others.is_empty():
+				_auto_capture(region, attacker_id)
+			else:
+				var defender_id: StringName = _strongest_faction(others, region)
+				_resolve_combat(region, attacker_id, defender_id)
+		else:
+			var defender_stack: UnitStack = region.stacks.get(region.owner_faction_id)
+			if defender_stack == null or defender_stack.is_empty():
+				_auto_capture(region, attacker_id)
+			else:
+				_resolve_combat(region, attacker_id, region.owner_faction_id)
+
+func _strongest_faction(candidate_ids: Array, region: Region) -> StringName:
+	var best_id: StringName = candidate_ids[0]
+	var best_power := -1.0
+	for fid in candidate_ids:
+		var stack: UnitStack = region.stacks.get(fid)
+		var faction: Faction = GameState.get_faction(fid)
+		var power := CombatResolver.stack_power(stack, true, faction, region)
+		if power > best_power:
+			best_power = power
+			best_id = fid
+	return best_id
+
+func _auto_capture(region: Region, faction_id: StringName) -> void:
+	GameState.set_region_owner(region.def.id, faction_id)
+	last_combat_log.append({"region_id": region.def.id, "type": "auto_capture", "faction_id": faction_id})
+
+func _resolve_combat(region: Region, attacker_id: StringName, defender_id: StringName) -> void:
+	var attacker_stack: UnitStack = region.stacks.get(attacker_id)
+	var defender_stack: UnitStack = region.stacks.get(defender_id)
+	var attacker_before: int = attacker_stack.total_count()
+	var defender_before: int = defender_stack.total_count() if defender_stack else 0
+
+	var result := CombatResolver.resolve(attacker_stack, defender_stack, region)
+	attacker_stack.apply_losses(result.attacker_losses)
+	if defender_stack:
+		defender_stack.apply_losses(result.defender_losses)
+	if result.region_captured:
+		GameState.set_region_owner(region.def.id, attacker_id)
+
+	last_combat_log.append({
+		"region_id": region.def.id,
+		"type": "battle",
+		"attacker_id": attacker_id,
+		"defender_id": defender_id,
+		"outcome": result.outcome,
+		"attacker_before": attacker_before,
+		"attacker_after": attacker_stack.total_count(),
+		"defender_before": defender_before,
+		"defender_after": defender_stack.total_count() if defender_stack else 0,
+		"captured": result.region_captured,
+	})
 
 func _run_diplomacy_phase() -> void:
 	pass  # Relation-score ticking/events land with AI/diplomacy work in M4.

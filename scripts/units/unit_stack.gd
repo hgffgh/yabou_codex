@@ -17,5 +17,14 @@ func total_count() -> int:
 func add_units(unit_type_id: StringName, count: int) -> void:
 	units[unit_type_id] = units.get(unit_type_id, 0) + count
 
+func apply_losses(losses: Dictionary) -> void:
+	for unit_id in losses:
+		var lost: int = losses[unit_id]
+		var remaining: int = max(units.get(unit_id, 0) - lost, 0)
+		if remaining <= 0:
+			units.erase(unit_id)
+		else:
+			units[unit_id] = remaining
+
 func is_empty() -> bool:
 	return total_count() == 0
