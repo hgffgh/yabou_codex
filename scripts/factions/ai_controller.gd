@@ -16,8 +16,10 @@ static func decide_orders(faction_id: StringName) -> void:
 		_decide_production(faction, region)
 		_decide_movement(faction_id, faction, region)
 
+const MAX_QUEUE_LENGTH := 3  # keep the AI's production responsive to the battlefield rather than committing resources many turns ahead
+
 static func _decide_production(faction: Faction, region: Region) -> void:
-	if not region.pending_production.is_empty():
+	if region.pending_production.size() >= MAX_QUEUE_LENGTH:
 		return
 	var cheapest := _cheapest_tier0_unit()
 	if cheapest != null and faction.resources >= cheapest.build_cost:

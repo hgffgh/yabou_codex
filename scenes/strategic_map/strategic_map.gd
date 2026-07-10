@@ -14,6 +14,7 @@ var _region_owner_label: Label
 var _region_yield_label: Label
 var _production_option: OptionButton
 var _produce_button: Button
+var _production_queue_label: Label
 var _move_option: OptionButton
 var _move_button: Button
 var _log_label: Label
@@ -22,6 +23,8 @@ var _zoom_level: float = 1.0
 var _dragging: bool = false
 var _drag_start_mouse: Vector2
 var _drag_start_cam: Vector2
+
+const MAX_PLAYER_QUEUE_LENGTH := 5  # keep in sync with AiController.MAX_QUEUE_LENGTH's intent
 
 func _ready() -> void:
 	_build_camera()
@@ -302,6 +305,12 @@ func _build_ui_overlay() -> void:
 	_produce_button.pressed.connect(_on_produce_pressed)
 	info_panel.add_child(_produce_button)
 
+	_production_queue_label = Label.new()
+	_production_queue_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	_production_queue_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_production_queue_label.custom_minimum_size = Vector2(280, 0)
+	info_panel.add_child(_production_queue_label)
+
 	info_panel.add_child(HSeparator.new())
 
 	var move_label := Label.new()
@@ -331,6 +340,7 @@ func _update_info_panel() -> void:
 		_region_yield_label.text = ""
 		_production_option.disabled = true
 		_produce_button.disabled = true
+		_production_queue_label.text = ""
 		_move_option.disabled = true
 		_move_button.disabled = true
 		return
@@ -351,15 +361,17 @@ func _update_info_panel() -> void:
 		var udef: UnitType = GameState.unit_defs[uid]
 		if udef.tech_tier_required > 0:
 			continue
-		var label := "%s (%d)" % [udef.display_name, udef.build_cost]
+		var label := "%s (%d・%dターン)" % [udef.display_name, udef.build_cost, udef.build_time_turns]
 		if udef.icon:
 			_production_option.add_icon_item(udef.icon, label)
 		else:
 			_production_option.add_item(label)
 		_production_option.set_item_metadata(_production_option.item_count - 1, uid)
-	var can_produce := is_player_owned and orders_open and region.pending_production.is_empty()
+	var queue_full := region.pending_production.size() >= MAX_PLAYER_QUEUE_LENGTH
+	var can_produce := is_player_owned and orders_open and not queue_full
 	_production_option.disabled = not can_produce
 	_produce_button.disabled = not can_produce
+	_production_queue_label.text = _build_queue_text(region)
 
 	_move_option.clear()
 	for neighbor_id in region.def.neighbor_ids:
@@ -375,8 +387,8 @@ func _on_produce_pressed() -> void:
 	if _selected_region_id == &"":
 		return
 	var region: Region = GameState.regions[_selected_region_id]
-	if not region.pending_production.is_empty():
-		_append_log("この領域は既に生産を予約しています。")
+	if region.pending_production.size() >= MAX_PLAYER_QUEUE_LENGTH:
+		_append_log("これ以上この領域には生産を予約できません（上限%d件）。" % MAX_PLAYER_QUEUE_LENGTH)
 		return
 	var idx := _production_option.selected
 	if idx < 0:
@@ -392,6 +404,24 @@ func _on_produce_pressed() -> void:
 	_append_log("%s で %s の生産を予約しました。" % [region.def.display_name, udef.display_name])
 	_update_info_panel()
 	_update_turn_ui()
+
+## Shows the front (actively building) job's remaining turns plus a list
+## of anything queued behind it — the front is the only one whose
+## turns_remaining actually ticks down each turn (see
+## TurnManager._advance_production).
+func _build_queue_text(region: Region) -> String:
+	if region.pending_production.is_empty():
+		return "生産キュー: なし"
+	var front = region.pending_production[0]
+	var front_udef: UnitType = GameState.unit_defs[front["unit_type_id"]]
+	var text := "生産中: %s（残り%dターン）" % [front_udef.display_name, front["turns_remaining"]]
+	if region.pending_production.size() > 1:
+		var queued_names: Array = []
+		for i in range(1, region.pending_production.size()):
+			var udef: UnitType = GameState.unit_defs[region.pending_production[i]["unit_type_id"]]
+			queued_names.append(udef.display_name)
+		text += "\n待機中: %s" % ", ".join(queued_names)
+	return text
 
 func _on_move_pressed() -> void:
 	if _selected_region_id == &"":

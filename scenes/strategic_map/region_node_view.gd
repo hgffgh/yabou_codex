@@ -8,8 +8,8 @@ extends Node2D
 signal region_clicked(region_id: StringName)
 
 const RADIUS := 28.0
-const BADGE_RADIUS := 12.0
-const BADGE_OFFSET := Vector2(20, 20)
+const BADGE_RADIUS := 16.0
+const BADGE_OFFSET := Vector2(22, 22)
 const PLAYER_RING_COLOR := Color(1.0, 0.85, 0.25, 0.95)
 
 var region_id: StringName
@@ -19,7 +19,8 @@ var is_selected: bool = false
 var is_hovered: bool = false
 var is_player_owned: bool = false
 
-var _badge_label: Label
+var _badge_icon: TextureRect
+var _badge_count_label: Label
 
 func setup(id: StringName, region: Region, color: Color) -> void:
 	region_id = id
@@ -48,15 +49,23 @@ func setup(id: StringName, region: Region, color: Color) -> void:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(label)
 
-	_badge_label = Label.new()
-	_badge_label.add_theme_font_size_override("font_size", 11)
-	_badge_label.add_theme_color_override("font_color", Color.WHITE)
-	_badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_badge_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_badge_label.position = BADGE_OFFSET - Vector2(BADGE_RADIUS, BADGE_RADIUS)
-	_badge_label.size = Vector2(BADGE_RADIUS * 2, BADGE_RADIUS * 2)
-	_badge_label.visible = false
-	add_child(_badge_label)
+	_badge_icon = TextureRect.new()
+	_badge_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_badge_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_badge_icon.size = Vector2(BADGE_RADIUS * 1.3, BADGE_RADIUS * 1.3)
+	_badge_icon.position = BADGE_OFFSET - _badge_icon.size / 2.0
+	_badge_icon.visible = false
+	add_child(_badge_icon)
+
+	_badge_count_label = Label.new()
+	_badge_count_label.add_theme_font_size_override("font_size", 10)
+	_badge_count_label.add_theme_color_override("font_color", Color.WHITE)
+	_badge_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_badge_count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_badge_count_label.position = BADGE_OFFSET + Vector2(2, BADGE_RADIUS - 6)
+	_badge_count_label.size = Vector2(24, 14)
+	_badge_count_label.visible = false
+	add_child(_badge_count_label)
 
 	update_unit_badge()
 	queue_redraw()
@@ -76,18 +85,33 @@ func set_selected(selected: bool) -> void:
 	is_selected = selected
 	queue_redraw()
 
-## Small numeral badge showing total units stationed here, so the player
-## can see where their (and the enemy's) forces are without clicking every
-## region — this was the main usability gap the M5.5 pass targeted.
+## Badge showing the dominant unit type stationed here (by count) plus a
+## total count, so the player can see WHAT is garrisoned where, not just
+## THAT something is — a plain number badge didn't answer "which unit?"
 func update_unit_badge() -> void:
 	var total := 0
+	var dominant_id: StringName = &""
+	var dominant_count := -1
 	for stack in region_ref.stacks.values():
-		total += stack.total_count()
+		for uid in stack.units:
+			var count: int = stack.units[uid]
+			total += count
+			if count > dominant_count:
+				dominant_count = count
+				dominant_id = uid
+
 	if total <= 0:
-		_badge_label.visible = false
+		_badge_icon.visible = false
+		_badge_count_label.visible = false
 	else:
-		_badge_label.visible = true
-		_badge_label.text = str(total) if total < 100 else "99+"
+		_badge_count_label.visible = true
+		_badge_count_label.text = str(total) if total < 100 else "99+"
+		var udef: UnitType = GameState.unit_defs.get(dominant_id)
+		if udef and udef.icon:
+			_badge_icon.texture = udef.icon
+			_badge_icon.visible = true
+		else:
+			_badge_icon.visible = false
 	queue_redraw()
 
 func _on_mouse_entered() -> void:
@@ -118,6 +142,9 @@ func _draw() -> void:
 	if region_ref.def.is_capital_slot:
 		draw_circle(Vector2.ZERO, RADIUS * 0.35, Color.WHITE)
 
-	if _badge_label and _badge_label.visible:
+	if _badge_icon and _badge_icon.visible:
 		draw_circle(BADGE_OFFSET, BADGE_RADIUS, Color(0.1, 0.1, 0.13, 0.95))
 		draw_arc(BADGE_OFFSET, BADGE_RADIUS, 0, TAU, 20, Color.WHITE, 1.5)
+		# Small dark pill behind the count so it stays legible over the icon.
+		var count_pos := BADGE_OFFSET + Vector2(2, BADGE_RADIUS - 6) + Vector2(12, 7)
+		draw_circle(count_pos, 8.0, Color(0.05, 0.05, 0.07, 0.9))

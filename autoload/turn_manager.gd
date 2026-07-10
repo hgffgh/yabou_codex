@@ -68,16 +68,19 @@ func _run_income_phase() -> void:
 		if faction:
 			faction.resources += region.def.resource_yield
 
+## A region can queue several units, but only the front of the queue is
+## actually being built at once — matches the "one production line per
+## base" mental model and keeps a single, unambiguous turns-remaining
+## number to show in the UI, rather than N units all finishing at once.
 func _advance_production(region: Region) -> void:
-	var still_building := []
-	for job in region.pending_production:
-		job["turns_remaining"] -= 1
-		if job["turns_remaining"] <= 0:
-			var stack := region.get_or_create_stack(region.owner_faction_id)
-			stack.add_units(job["unit_type_id"], 1)
-		else:
-			still_building.append(job)
-	region.pending_production = still_building
+	if region.pending_production.is_empty():
+		return
+	var job = region.pending_production[0]
+	job["turns_remaining"] -= 1
+	if job["turns_remaining"] <= 0:
+		var stack := region.get_or_create_stack(region.owner_faction_id)
+		stack.add_units(job["unit_type_id"], 1)
+		region.pending_production.pop_front()
 
 func _run_ai_orders() -> void:
 	for fid in GameState.factions:
