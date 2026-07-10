@@ -4,5 +4,5 @@
 
 [resource]
 script = ExtResource("1")
-turn_cap = 24
-victory_region_threshold_pct = 0.6
+turn_cap = 18
+victory_region_threshold_pct = 0.875

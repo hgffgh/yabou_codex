@@ -4,12 +4,12 @@
 
 [resource]
 script = ExtResource("1")
-id = &"sc_interior_a"
-display_name = "ソル協約造船所"
-map_position = Vector2(150, -350)
-neighbor_ids = Array[StringName]([&"sc_capital", &"sc_border"])
+id = &"crimson_outpost"
+display_name = "クリムゾン帝国前哨基地"
+map_position = Vector2(350, 100)
+neighbor_ids = Array[StringName]([&"crimson_capital", &"crimson_border"])
 terrain_type = &"shipyard_belt"
 resource_yield = 8
 is_capital_slot = false
-starting_owner_faction_id = &"sol_compact"
+starting_owner_faction_id = &"crimson_empire"
 defense_terrain_bonus = 5

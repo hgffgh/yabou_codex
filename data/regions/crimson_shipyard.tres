@@ -4,12 +4,12 @@
 
 [resource]
 script = ExtResource("1")
-id = &"uc_interior_a"
-display_name = "アンブラ盟約造船所"
-map_position = Vector2(-150, 350)
-neighbor_ids = Array[StringName]([&"uc_capital", &"uc_border"])
+id = &"crimson_shipyard"
+display_name = "クリムゾン帝国造船所"
+map_position = Vector2(350, -100)
+neighbor_ids = Array[StringName]([&"crimson_capital", &"crimson_border"])
 terrain_type = &"shipyard_belt"
 resource_yield = 8
 is_capital_slot = false
-starting_owner_faction_id = &"umbra_concord"
+starting_owner_faction_id = &"crimson_empire"
 defense_terrain_bonus = 5

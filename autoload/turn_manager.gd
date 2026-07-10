@@ -157,6 +157,11 @@ func _resolve_combat(region: Region, attacker_id: StringName, defender_id: Strin
 	var defender_stack: UnitStack = region.stacks.get(defender_id)
 	var attacker_before: int = attacker_stack.total_count()
 	var defender_before: int = defender_stack.total_count() if defender_stack else 0
+	# Snapshot composition before losses are applied, so the vignette can
+	# show which unit types were actually involved (apply_losses may zero
+	# out and erase entries from stack.units).
+	var attacker_units_before: Dictionary = attacker_stack.units.duplicate()
+	var defender_units_before: Dictionary = defender_stack.units.duplicate() if defender_stack else {}
 
 	var result := CombatResolver.resolve(attacker_stack, defender_stack, region)
 	attacker_stack.apply_losses(result.attacker_losses)
@@ -175,6 +180,8 @@ func _resolve_combat(region: Region, attacker_id: StringName, defender_id: Strin
 		"attacker_after": attacker_stack.total_count(),
 		"defender_before": defender_before,
 		"defender_after": defender_stack.total_count() if defender_stack else 0,
+		"attacker_units": attacker_units_before,
+		"defender_units": defender_units_before,
 		"captured": result.region_captured,
 	})
 

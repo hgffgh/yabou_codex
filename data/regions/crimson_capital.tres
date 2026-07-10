@@ -4,12 +4,12 @@
 
 [resource]
 script = ExtResource("1")
-id = &"ad_capital"
-display_name = "アウレリアン専制首都"
-map_position = Vector2(-500, 0)
-neighbor_ids = Array[StringName]([&"ad_interior_a", &"ad_interior_b"])
+id = &"crimson_capital"
+display_name = "クリムゾン帝国首都"
+map_position = Vector2(500, 0)
+neighbor_ids = Array[StringName]([&"crimson_shipyard", &"crimson_outpost"])
 terrain_type = &"core_world"
 resource_yield = 15
 is_capital_slot = true
-starting_owner_faction_id = &"aurelian_dominion"
+starting_owner_faction_id = &"crimson_empire"
 defense_terrain_bonus = 20

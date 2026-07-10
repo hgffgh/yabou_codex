@@ -4,12 +4,12 @@
 
 [resource]
 script = ExtResource("1")
-id = &"sc_border"
-display_name = "ソル協約国境哨戒所"
-map_position = Vector2(0, -200)
-neighbor_ids = Array[StringName]([&"sc_interior_a", &"sc_interior_b", &"nexus_station", &"ks_border", &"ad_border"])
+id = &"nova_border"
+display_name = "ノヴァ共和国国境哨戒所"
+map_position = Vector2(-150, 0)
+neighbor_ids = Array[StringName]([&"nova_shipyard", &"nova_outpost", &"crimson_border"])
 terrain_type = &"border_zone"
 resource_yield = 6
 is_capital_slot = false
-starting_owner_faction_id = &"sol_compact"
+starting_owner_faction_id = &"nova_republic"
 defense_terrain_bonus = 10

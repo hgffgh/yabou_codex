@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://brg0a7ur2hbq5"
-path="res://.godot/imported/umbra_concord.svg-e66413be7f26e99505993a75336cc237.ctex"
+uid="uid://ctpta8127je1q"
+path="res://.godot/imported/crimson_empire.svg-a7aa5fc8a1fdc36a674dd5b1574a0c43.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/emblems/umbra_concord.svg"
-dest_files=["res://.godot/imported/umbra_concord.svg-e66413be7f26e99505993a75336cc237.ctex"]
+source_file="res://assets/ui/emblems/crimson_empire.svg"
+dest_files=["res://.godot/imported/crimson_empire.svg-a7aa5fc8a1fdc36a674dd5b1574a0c43.ctex"]
 
 [params]
 

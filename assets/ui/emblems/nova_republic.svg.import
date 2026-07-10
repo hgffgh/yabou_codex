@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d2hapc4de3p27"
-path="res://.godot/imported/aurelian_dominion.svg-d8551a016787fd14037d2526c357456a.ctex"
+uid="uid://cv82u2buhec3i"
+path="res://.godot/imported/nova_republic.svg-1fabda1b22d50a8f218979d8be8a67fb.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/emblems/aurelian_dominion.svg"
-dest_files=["res://.godot/imported/aurelian_dominion.svg-d8551a016787fd14037d2526c357456a.ctex"]
+source_file="res://assets/ui/emblems/nova_republic.svg"
+dest_files=["res://.godot/imported/nova_republic.svg-1fabda1b22d50a8f218979d8be8a67fb.ctex"]
 
 [params]
 

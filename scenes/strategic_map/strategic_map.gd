@@ -71,13 +71,24 @@ func _fit_camera_to_map() -> void:
 	var map_size: Vector2 = max_pos - min_pos
 	var map_center: Vector2 = (min_pos + max_pos) / 2.0
 
+	# Reserve space for the top bar and the side panel so the fitted map
+	# doesn't just avoid clipping at the raw viewport edges, but also avoids
+	# rendering key regions (e.g. the far faction's capital) underneath
+	# either HUD panel.
+	var reserved_top := 100.0
+	var reserved_right := 360.0
 	var viewport_size := get_viewport_rect().size
-	var usable_height := viewport_size.y - 100.0  # leave room under the top bar
-	var target_zoom: float = clamp(min(viewport_size.x / map_size.x, usable_height / map_size.y), MIN_ZOOM, 1.0)
+	var safe_size := Vector2(viewport_size.x - reserved_right, viewport_size.y - reserved_top)
+	var target_zoom: float = clamp(min(safe_size.x / map_size.x, safe_size.y / map_size.y), MIN_ZOOM, 1.0)
 
 	_zoom_level = target_zoom
 	_camera.zoom = Vector2(target_zoom, target_zoom)
-	_camera.position = map_center
+
+	# Shift the camera so the map centers within that safe area rather than
+	# the full screen — the camera always projects its .position to screen
+	# center, so we offset away from map_center by half the reserved strips.
+	var screen_center_to_safe_center := Vector2(-reserved_right / 2.0, reserved_top / 2.0)
+	_camera.position = map_center - screen_center_to_safe_center / target_zoom
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:

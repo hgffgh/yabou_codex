@@ -73,8 +73,8 @@ func setup(entry: Dictionary) -> void:
 	clash_area.custom_minimum_size = Vector2(0, 56)
 	vbox.add_child(clash_area)
 
-	_attacker_icon = _make_icon(attacker_fdef)
-	_defender_icon = _make_icon(defender_fdef)
+	_attacker_icon = _make_icon(attacker_fdef, entry.get("attacker_units", {}))
+	_defender_icon = _make_icon(defender_fdef, entry.get("defender_units", {}))
 	_attacker_rest_pos = Vector2(0, 4)
 	_defender_rest_pos = Vector2(456, 4)
 	_attacker_icon.position = _attacker_rest_pos
@@ -107,7 +107,12 @@ func setup(entry: Dictionary) -> void:
 
 	_play_clash()
 
-func _make_icon(fdef: FactionDef) -> Control:
+## The faction-colored circle is the "team" identity; what's drawn inside
+## it is the actual unit type(s) fighting (up to 2, by count), not just the
+## faction emblem — the player asked to see which units are in the fight,
+## not just who owns them. Falls back to the emblem if a stack somehow has
+## no composition data.
+func _make_icon(fdef: FactionDef, units: Dictionary) -> Control:
 	var wrapper := Control.new()
 	wrapper.size = Vector2(48, 48)
 
@@ -121,18 +126,39 @@ func _make_icon(fdef: FactionDef) -> Control:
 	bg.add_theme_stylebox_override("panel", sb)
 	wrapper.add_child(bg)
 
-	if fdef.emblem:
-		var emblem := TextureRect.new()
-		emblem.texture = fdef.emblem
-		# Without this, TextureRect uses the texture's native size (our SVGs
-		# are 128x128) as its minimum size and ignores .size entirely.
-		emblem.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		emblem.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		emblem.position = Vector2(6, 6)
-		emblem.size = Vector2(36, 36)
-		wrapper.add_child(emblem)
+	var unit_ids := _dominant_unit_ids(units, 2)
+	if unit_ids.is_empty():
+		if fdef.emblem:
+			_add_icon_texture(wrapper, fdef.emblem, Vector2(6, 6), Vector2(36, 36))
+	elif unit_ids.size() == 1:
+		var udef: UnitType = GameState.unit_defs[unit_ids[0]]
+		if udef.icon:
+			_add_icon_texture(wrapper, udef.icon, Vector2(6, 6), Vector2(36, 36))
+	else:
+		for i in range(unit_ids.size()):
+			var udef: UnitType = GameState.unit_defs[unit_ids[i]]
+			if udef.icon:
+				_add_icon_texture(wrapper, udef.icon, Vector2(4.0 + i * 22.0, 12), Vector2(20, 20))
 
 	return wrapper
+
+func _dominant_unit_ids(units: Dictionary, max_count: int) -> Array:
+	var ids := units.keys()
+	ids.sort_custom(func(a, b): return units[a] > units[b])
+	if ids.size() > max_count:
+		ids = ids.slice(0, max_count)
+	return ids
+
+func _add_icon_texture(parent: Control, texture: Texture2D, pos: Vector2, size: Vector2) -> void:
+	var rect := TextureRect.new()
+	rect.texture = texture
+	# Without this, TextureRect uses the texture's native size (our SVGs
+	# are 128x128) as its minimum size and ignores .size entirely.
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.position = pos
+	rect.size = size
+	parent.add_child(rect)
 
 func _build_side_row(parent: VBoxContainer, label_text: String, color: Color) -> ProgressBar:
 	var label := Label.new()

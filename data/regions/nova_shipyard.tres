@@ -4,12 +4,12 @@
 
 [resource]
 script = ExtResource("1")
-id = &"ad_interior_b"
-display_name = "アウレリアン専制前哨基地"
-map_position = Vector2(-350, 150)
-neighbor_ids = Array[StringName]([&"ad_capital", &"ad_border"])
+id = &"nova_shipyard"
+display_name = "ノヴァ共和国造船所"
+map_position = Vector2(-350, -100)
+neighbor_ids = Array[StringName]([&"nova_capital", &"nova_border"])
 terrain_type = &"shipyard_belt"
 resource_yield = 8
 is_capital_slot = false
-starting_owner_faction_id = &"aurelian_dominion"
+starting_owner_faction_id = &"nova_republic"
 defense_terrain_bonus = 5

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://resources/faction_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/ui/emblems/nova_republic.svg" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"nova_republic"
+display_name = "ノヴァ共和国"
+color = Color(0.3, 0.55, 0.95, 1)
+is_ai_controlled = true
+starting_region_id = &"nova_capital"
+starting_resources = 130
+tech_bonus = {"defense": 0.1}
+ai_aggression = 0.4
+starting_relations = {}
+emblem = ExtResource("2")

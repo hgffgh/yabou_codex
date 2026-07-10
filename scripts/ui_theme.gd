@@ -77,10 +77,17 @@ static func _style(bg: Color, border: Color, radius: int, border_width: int = 1)
 
 ## Convenience: a rounded card background sized/positioned by the caller.
 ## Panel (not PanelContainer) never auto-resizes to its children, so this
-## is safe to use anywhere a fixed-size backdrop is needed.
+## is safe to use anywhere a fixed-size backdrop is needed — including
+## directly inside a CenterContainer, which is why custom_minimum_size is
+## set here too: a bare Panel reports a (0,0) minimum size, so
+## CenterContainer was silently shrinking the card to a point and only
+## centering *that*, leaving its absolutely-positioned children (built by
+## the caller) rendering off-center toward the bottom-right instead of the
+## whole card being centered as a block.
 static func make_card(size: Vector2) -> Panel:
 	var panel := Panel.new()
 	panel.theme = get_theme()
+	panel.custom_minimum_size = size
 	panel.size = size
 	return panel
 
