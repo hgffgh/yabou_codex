@@ -27,7 +27,7 @@ func _ready() -> void:
 	vbox.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "四勢力による宙域制圧。オリジナル設定・短時間プレイ。"
+	subtitle.text = "二大勢力による宙域制圧。オリジナル設定・短時間プレイ。"
 	subtitle.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(subtitle)

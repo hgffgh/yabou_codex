@@ -27,6 +27,7 @@ var _drag_start_cam: Vector2
 const MAX_PLAYER_QUEUE_LENGTH := 5  # keep in sync with AiController.MAX_QUEUE_LENGTH's intent
 
 func _ready() -> void:
+	_build_starfield()
 	_build_camera()
 	_build_regions_and_lines()
 	_fit_camera_to_map()
@@ -41,6 +42,31 @@ func _ready() -> void:
 
 	_update_turn_ui()
 	_update_info_panel()
+
+# ---------------- Background ----------------
+
+## Deterministic starfield (fixed seed, generated once) so the flat gray
+## map background reads as "space" instead of an empty void — cheap: a
+## few hundred static points drawn via the `draw` signal, no per-frame
+## recomputation.
+func _build_starfield() -> void:
+	var stars := Node2D.new()
+	stars.z_index = -20
+	add_child(stars)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260710
+	var points: Array = []
+	for i in range(260):
+		var pos := Vector2(rng.randf_range(-1400, 1400), rng.randf_range(-1000, 1000))
+		var brightness := rng.randf_range(0.18, 0.85)
+		var size := rng.randf_range(1.0, 2.4)
+		points.append([pos, brightness, size])
+
+	stars.draw.connect(func():
+		for p in points:
+			stars.draw_circle(p[0], p[2], Color(1, 1, 1, p[1]))
+	)
 
 # ---------------- Camera ----------------
 
@@ -460,10 +486,19 @@ func _on_turn_events_ready(summary: String) -> void:
 func _on_phase_changed(_phase) -> void:
 	_update_turn_ui()
 	_update_info_panel()
+	_flash_label(_phase_label)
+
+## Brief color pulse so turn/phase changes register as an event instead
+## of the label just silently changing text.
+func _flash_label(label: Label) -> void:
+	label.modulate = Color(1.6, 1.6, 1.6)
+	var tween := create_tween()
+	tween.tween_property(label, "modulate", Color.WHITE, 0.35)
 
 func _on_turn_advanced(_turn_number: int) -> void:
 	_update_turn_ui()
 	_refresh_all_region_colors()
+	_flash_label(_turn_label)
 
 func _update_turn_ui() -> void:
 	_turn_label.text = "ターン %d / %d" % [GameState.turn_number, GameState.campaign_config.turn_cap]

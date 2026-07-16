@@ -31,6 +31,8 @@ var _outcome_label: Label
 var _skip_button: Button
 var _active_tween: Tween
 var _entry: Dictionary
+var _card: Panel
+var _card_rest_pos: Vector2
 
 func setup(entry: Dictionary) -> void:
 	_entry = entry
@@ -50,14 +52,14 @@ func setup(entry: Dictionary) -> void:
 	root.add_child(center)
 	UIUtils.fill_parent(center)
 
-	var card := UITheme.make_card(Vector2(560, 340))
-	center.add_child(card)
+	_card = UITheme.make_card(Vector2(560, 340))
+	center.add_child(_card)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 12)
 	vbox.position = Vector2(28, 22)
 	vbox.size = Vector2(504, 296)
-	card.add_child(vbox)
+	_card.add_child(vbox)
 
 	var region_name: String = GameState.region_defs[entry["region_id"]].display_name
 	var title := Label.new()
@@ -192,6 +194,49 @@ func _flash_impact() -> void:
 	_flash.color = Color(1, 1, 1, 0.9)
 	var flash_tween := create_tween()
 	flash_tween.tween_property(_flash, "color:a", 0.0, 0.3)
+	_spawn_impact_sparks()
+	_shake_card()
+	_punch_icon(_attacker_icon)
+	_punch_icon(_defender_icon)
+
+## A handful of lines radiating out from the impact point and fading —
+## cheap "hit effect" using only draw primitives, no particle assets.
+func _spawn_impact_sparks() -> void:
+	var center: Vector2 = _flash.position + _flash.size / 2.0
+	var parent := _flash.get_parent()
+	for i in range(8):
+		var angle := i * TAU / 8.0 + randf_range(-0.15, 0.15)
+		var spark := Line2D.new()
+		spark.width = 3.0
+		spark.default_color = Color(1.0, 0.85, 0.55, 1.0)
+		spark.add_point(center)
+		spark.add_point(center)
+		parent.add_child(spark)
+		var end_point: Vector2 = center + Vector2(cos(angle), sin(angle)) * randf_range(22, 34)
+		var tween := create_tween()
+		tween.tween_method(func(t): spark.set_point_position(1, center.lerp(end_point, t)), 0.0, 1.0, 0.22)
+		tween.parallel().tween_property(spark, "modulate:a", 0.0, 0.28)
+		tween.tween_callback(spark.queue_free)
+
+## A brief positional jitter on the whole card — sells the impact as
+## something that landed, not just a color flash.
+func _shake_card() -> void:
+	var rest: Vector2 = _card.position
+	_card_rest_pos = rest
+	var shake := create_tween()
+	shake.tween_property(_card, "position", rest + Vector2(6, 0), 0.04)
+	shake.tween_property(_card, "position", rest + Vector2(-5, 0), 0.04)
+	shake.tween_property(_card, "position", rest + Vector2(3, 0), 0.04)
+	shake.tween_property(_card, "position", rest, 0.04)
+
+## Per-unit "hit reaction": a quick scale punch on each faction's icon at
+## the moment of impact, so the units themselves look like they collided
+## rather than just sliding together.
+func _punch_icon(icon: Control) -> void:
+	icon.pivot_offset = icon.size / 2.0
+	var punch := create_tween()
+	punch.tween_property(icon, "scale", Vector2(1.25, 1.25), 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	punch.tween_property(icon, "scale", Vector2(1.0, 1.0), 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _play_bars() -> void:
 	var attacker_before: int = max(_entry["attacker_before"], 1)
@@ -215,8 +260,12 @@ func _show_outcome() -> void:
 
 func _snap_to_end_state() -> void:
 	_attacker_icon.position = _attacker_rest_pos
+	_attacker_icon.scale = Vector2.ONE
 	_defender_icon.position = _defender_rest_pos
+	_defender_icon.scale = Vector2.ONE
 	_flash.color = Color(1, 1, 1, 0.0)
+	if _card_rest_pos != Vector2.ZERO:
+		_card.position = _card_rest_pos
 	_attacker_bar.value = float(_entry["attacker_after"]) / float(max(_entry["attacker_before"], 1))
 	_defender_bar.value = float(_entry["defender_after"]) / float(max(_entry["defender_before"], 1))
 

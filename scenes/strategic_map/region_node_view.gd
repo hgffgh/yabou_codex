@@ -141,6 +141,8 @@ func _draw() -> void:
 
 	if region_ref.def.is_capital_slot:
 		draw_circle(Vector2.ZERO, RADIUS * 0.35, Color.WHITE)
+	else:
+		_draw_terrain_accent()
 
 	if _badge_icon and _badge_icon.visible:
 		draw_circle(BADGE_OFFSET, BADGE_RADIUS, Color(0.1, 0.1, 0.13, 0.95))
@@ -148,3 +150,25 @@ func _draw() -> void:
 		# Small dark pill behind the count so it stays legible over the icon.
 		var count_pos := BADGE_OFFSET + Vector2(2, BADGE_RADIUS - 6) + Vector2(12, 7)
 		draw_circle(count_pos, 8.0, Color(0.05, 0.05, 0.07, 0.9))
+
+## A small top-left glyph hinting at the region's terrain_type, so the map
+## isn't just uniform circles — capitals already stand out via their
+## white core dot, so this only draws for non-capital terrain.
+func _draw_terrain_accent() -> void:
+	var terrain: StringName = region_ref.def.terrain_type
+	var accent_pos := Vector2(-18, -18)
+	var accent_color := Color(1, 1, 1, 0.55)
+	match terrain:
+		"shipyard_belt":
+			# small square outline — production/industry
+			draw_rect(Rect2(accent_pos - Vector2(5, 5), Vector2(10, 10)), accent_color, false, 1.6)
+		"border_zone":
+			# small triangle — front line / lookout
+			var pts := PackedVector2Array([
+				accent_pos + Vector2(0, -6),
+				accent_pos + Vector2(6, 5),
+				accent_pos + Vector2(-6, 5),
+			])
+			draw_polyline(pts + PackedVector2Array([pts[0]]), accent_color, 1.6)
+		_:
+			pass
