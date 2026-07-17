@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tech_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"prototype_foundation"
+display_name = "Prototype Foundation"
+cost = 0
+unlocks_unit_ids = Array[StringName]([&"nova_scout", &"nova_vanguard", &"crimson_bastion"])

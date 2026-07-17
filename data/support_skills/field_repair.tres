@@ -1,0 +1,20 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/support_skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"field_repair"
+display_name_key = &"support_skill.field_repair.name"
+action_type = 1
+priority = 10
+trigger_resource = &"hp_pct"
+trigger_threshold_pct = 0.5
+target_rule = 0
+target_pattern = 0
+fixed_repair = 250
+max_hp_repair_pct = 0.1
+transfer_en = 0
+en_cost = 40
+post_action_delay_sec = 3.0
+can_target_self = true

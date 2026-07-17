@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/battle_control_point_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"standard_attacker_hq"
+is_headquarters = true
+position = Vector3(-500, 0, 0)
+capture_radius_m = 70.0
+

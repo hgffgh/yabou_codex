@@ -1,0 +1,36 @@
+[gd_resource type="Resource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://resources/unit_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/units/scout_frame.svg" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/units/placeholder_unit_model.tscn" id="3"]
+
+[resource]
+script = ExtResource("1")
+id = &"nova_scout"
+display_name_key = &"unit.nova_scout.name"
+description_key = &"unit.nova_scout.description"
+faction_origin_id = &"nova_republic"
+size = 0
+role = 3
+icon = ExtResource("2")
+model_scene = ExtResource("3")
+vignette_sprite = ExtResource("2")
+max_hp = 1000
+max_en = 260
+firepower = 120
+armor = 70
+speed = 180
+evasion = 35
+ground_aptitude = 1
+space_aptitude = 0
+moon_aptitude = 1
+ballistic_damage_multiplier = 1.0
+beam_damage_multiplier = 0.75
+melee_damage_multiplier = 0.75
+weapon_ids = Array[StringName]([&"light_autocannon"])
+support_skill_ids = Array[StringName]([])
+sensor_range_m = 300.0
+sensor_ignores_obstacles = true
+capture_allowed = true
+power_adjustment = 1.0
+tech_id = &"prototype_foundation"

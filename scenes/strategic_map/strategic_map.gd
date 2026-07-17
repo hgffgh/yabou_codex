@@ -12,12 +12,17 @@ var _phase_label: Label
 var _region_name_label: Label
 var _region_owner_label: Label
 var _region_yield_label: Label
+var _region_supply_label: Label
 var _production_option: OptionButton
 var _produce_button: Button
 var _production_queue_label: Label
+var _squad_option: OptionButton
 var _move_option: OptionButton
 var _move_button: Button
+var _formation_button: Button
 var _log_label: Label
+var _development_button: Button
+var _end_turn_button: Button
 
 var _zoom_level: float = 1.0
 var _dragging: bool = false
@@ -34,11 +39,14 @@ func _ready() -> void:
 	_build_ui_overlay()
 
 	TurnManager.phase_changed.connect(_on_phase_changed)
-	TurnManager.battle_ready_for_vignette.connect(_on_battle_ready_for_vignette)
+	TurnManager.active_faction_changed.connect(_on_active_faction_changed)
 	TurnManager.turn_events_ready.connect(_on_turn_events_ready)
+	TurnManager.squad_battles_detected.connect(_on_squad_battles_detected)
+	TurnManager.battle_runtime_ready.connect(_on_battle_runtime_ready)
 	GameState.turn_advanced.connect(_on_turn_advanced)
 	GameState.region_ownership_changed.connect(_on_region_ownership_changed)
 	GameState.game_over.connect(_on_game_over)
+	GameState.supply_network_changed.connect(_on_supply_network_changed)
 
 	_update_turn_ui()
 	_update_info_panel()
@@ -188,7 +196,7 @@ func _refresh_all_region_colors() -> void:
 
 func _refresh_all_region_badges() -> void:
 	for region_id in _region_views:
-		_region_views[region_id].update_unit_badge()
+		_region_views[region_id].update_squad_badge()
 
 func _on_region_ownership_changed(region_id: StringName, _old, _new) -> void:
 	if _region_views.has(region_id):
@@ -275,17 +283,17 @@ func _build_ui_overlay() -> void:
 	_phase_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top_bar.add_child(_phase_label)
 
-	var development_button := Button.new()
-	development_button.text = "開発"
-	development_button.custom_minimum_size = Vector2(90, 40)
-	development_button.pressed.connect(_on_development_pressed)
-	top_bar.add_child(development_button)
+	_development_button = Button.new()
+	_development_button.text = "開発"
+	_development_button.custom_minimum_size = Vector2(90, 40)
+	_development_button.pressed.connect(_on_development_pressed)
+	top_bar.add_child(_development_button)
 
-	var end_turn_button := Button.new()
-	end_turn_button.text = "ターン終了"
-	end_turn_button.custom_minimum_size = Vector2(120, 40)
-	end_turn_button.pressed.connect(_on_end_turn_pressed)
-	top_bar.add_child(end_turn_button)
+	_end_turn_button = Button.new()
+	_end_turn_button.text = "行動終了"
+	_end_turn_button.custom_minimum_size = Vector2(120, 40)
+	_end_turn_button.pressed.connect(_on_end_turn_pressed)
+	top_bar.add_child(_end_turn_button)
 
 	var menu_button := Button.new()
 	menu_button.text = "メインメニュー"
@@ -299,7 +307,7 @@ func _build_ui_overlay() -> void:
 	top_bar_card.size = top_bar.size + top_bar_margin * 2
 
 	var panel_width := 320.0
-	var panel_height := 440.0
+	var panel_height := 500.0
 	var side_panel := UITheme.make_card(Vector2(panel_width, panel_height))
 	side_panel.position = Vector2(get_viewport_rect().size.x - panel_width - 20, 20)
 	root.add_child(side_panel)
@@ -321,6 +329,8 @@ func _build_ui_overlay() -> void:
 	_region_yield_label = Label.new()
 	_region_yield_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	info_panel.add_child(_region_yield_label)
+	_region_supply_label = Label.new()
+	info_panel.add_child(_region_supply_label)
 
 	info_panel.add_child(HSeparator.new())
 
@@ -350,6 +360,10 @@ func _build_ui_overlay() -> void:
 	move_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	info_panel.add_child(move_label)
 
+	_squad_option = OptionButton.new()
+	_squad_option.item_selected.connect(func(_index: int): _update_info_panel())
+	info_panel.add_child(_squad_option)
+
 	_move_option = OptionButton.new()
 	info_panel.add_child(_move_option)
 
@@ -357,6 +371,11 @@ func _build_ui_overlay() -> void:
 	_move_button.text = "移動命令"
 	_move_button.pressed.connect(_on_move_pressed)
 	info_panel.add_child(_move_button)
+
+	_formation_button = Button.new()
+	_formation_button.text = "部隊編成…"
+	_formation_button.pressed.connect(_on_formation_pressed)
+	info_panel.add_child(_formation_button)
 
 	info_panel.add_child(HSeparator.new())
 	_log_label = Label.new()
@@ -370,11 +389,14 @@ func _update_info_panel() -> void:
 		_region_name_label.text = "領域が選択されていません"
 		_region_owner_label.text = ""
 		_region_yield_label.text = ""
+		_region_supply_label.text = ""
 		_production_option.disabled = true
 		_produce_button.disabled = true
 		_production_queue_label.text = ""
+		_squad_option.disabled = true
 		_move_option.disabled = true
 		_move_button.disabled = true
+		_formation_button.disabled = true
 		return
 
 	var region: Region = GameState.regions[_selected_region_id]
@@ -384,24 +406,43 @@ func _update_info_panel() -> void:
 		owner_name = GameState.faction_defs[region.owner_faction_id].display_name
 	_region_owner_label.text = "所有: %s" % owner_name
 	_region_yield_label.text = "産出: %d/ターン  ｜  防御: +%d" % [region.def.resource_yield, region.def.defense_terrain_bonus]
+	if region.owner_faction_id == GameState.player_faction_id:
+		var supplied := GameState.is_region_supplied(region.def.id, GameState.player_faction_id)
+		_region_supply_label.text = "補給: 接続" if supplied else "補給: 遮断"
+		_region_supply_label.add_theme_color_override("font_color", Color(0.35, 0.9, 0.75) if supplied else Color(1.0, 0.35, 0.35))
+	elif region.owner_faction_id.is_empty():
+		_region_supply_label.text = "補給: 対象外"
+		_region_supply_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	else:
+		_region_supply_label.text = "補給: 不明"
+		_region_supply_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 
 	var is_player_owned := region.owner_faction_id == GameState.player_faction_id
-	var orders_open := TurnManager.current_phase == TurnManager.Phase.ORDERS
+	var orders_open := TurnManager.current_phase == TurnManager.Phase.ORDERS and TurnManager.active_faction_id == GameState.player_faction_id and not TurnManager.is_resolving_turn
 
 	var player_faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	_production_option.clear()
-	for uid in GameState.unit_defs:
-		var udef: UnitType = GameState.unit_defs[uid]
-		if udef.tech_tier_required > player_faction.tech_tier:
+	for uid in GameState.master_data.units:
+		var udef: UnitDef = GameState.master_data.units[uid]
+		if udef.faction_origin_id != player_faction.def.id:
 			continue
-		var label := "%s (%d・%dターン)" % [udef.display_name, udef.build_cost, udef.build_time_turns]
+		var label := "%s（資金%d・物資%d）" % [
+			tr(String(udef.display_name_key)),
+			GameConstants.UNIT_PRODUCTION_FUNDS[udef.size],
+			GameConstants.UNIT_PRODUCTION_MATERIALS[udef.size],
+		]
 		if udef.icon:
 			_production_option.add_icon_item(udef.icon, label)
 		else:
 			_production_option.add_item(label)
 		_production_option.set_item_metadata(_production_option.item_count - 1, uid)
-	var queue_full := region.pending_production.size() >= MAX_PLAYER_QUEUE_LENGTH
-	var can_produce := is_player_owned and orders_open and not queue_full
+	var facility_ids := GameState.production_facility_ids_for_region(region.def.id)
+	var queue_size := 0
+	if not facility_ids.is_empty():
+		var production_queue := GameState.campaign_runtime.production_queues_by_facility_id.get(facility_ids[0]) as ProductionQueueState
+		queue_size = production_queue.job_ids.size() if production_queue != null else 0
+	var queue_full := queue_size >= MAX_PLAYER_QUEUE_LENGTH
+	var can_produce := is_player_owned and orders_open and not queue_full and not facility_ids.is_empty() and _production_option.item_count > 0
 	_production_option.disabled = not can_produce
 	_produce_button.disabled = not can_produce
 	_production_queue_label.text = _build_queue_text(region)
@@ -411,82 +452,224 @@ func _update_info_panel() -> void:
 		var ndef: RegionDef = GameState.region_defs[neighbor_id]
 		_move_option.add_item(ndef.display_name)
 		_move_option.set_item_metadata(_move_option.item_count - 1, neighbor_id)
-	var has_player_units: bool = region.stacks.has(GameState.player_faction_id) and not region.stacks[GameState.player_faction_id].is_empty()
-	var can_move: bool = is_player_owned and orders_open and has_player_units
+	_squad_option.clear()
+	for squad: SquadState in GameState.campaign_runtime.get_squads_in_region(region.def.id, GameState.player_faction_id):
+		var status := " [移動済]" if squad.movement_used else ""
+		_squad_option.add_item("%s (%d機)%s" % [squad.display_name, squad.unit_instance_ids.size(), status])
+		_squad_option.set_item_metadata(_squad_option.item_count - 1, squad.squad_id)
+	var selected_squad := GameState.campaign_runtime.get_squad(_squad_option.get_item_metadata(_squad_option.selected)) if _squad_option.selected >= 0 else null
+	var can_move: bool = is_player_owned and orders_open and selected_squad != null and not selected_squad.movement_used and _move_option.item_count > 0
+	_squad_option.disabled = not is_player_owned or not orders_open or _squad_option.item_count == 0
 	_move_option.disabled = not can_move
 	_move_button.disabled = not can_move
+	_formation_button.disabled = not is_player_owned or not orders_open or selected_squad == null
 
 func _on_produce_pressed() -> void:
-	if _selected_region_id == &"":
+	if _selected_region_id == &"" or _production_option.selected < 0:
 		return
 	var region: Region = GameState.regions[_selected_region_id]
-	if region.pending_production.size() >= MAX_PLAYER_QUEUE_LENGTH:
-		_append_log("これ以上この領域には生産を予約できません（上限%d件）。" % MAX_PLAYER_QUEUE_LENGTH)
+	var facility_ids := GameState.production_facility_ids_for_region(region.def.id)
+	if facility_ids.is_empty():
+		_append_log("この地域には生産施設がありません。")
 		return
-	var idx := _production_option.selected
-	if idx < 0:
+	var unit_id: StringName = _production_option.get_item_metadata(_production_option.selected)
+	var result := GameState.queue_production(GameState.player_faction_id, facility_ids[0], unit_id)
+	if not result.errors.is_empty():
+		_append_log("生産登録に失敗しました: %s" % result.errors[0])
 		return
-	var unit_id: StringName = _production_option.get_item_metadata(idx)
-	var udef: UnitType = GameState.unit_defs[unit_id]
-	var faction: Faction = GameState.get_faction(GameState.player_faction_id)
-	if faction.resources < udef.build_cost:
-		_append_log("%s を生産する資源が足りません。" % udef.display_name)
-		return
-	faction.resources -= udef.build_cost
-	region.pending_production.append({"unit_type_id": unit_id, "turns_remaining": udef.build_time_turns})
-	_append_log("%s で %s の生産を予約しました。" % [region.def.display_name, udef.display_name])
+	var unit_def := GameState.master_data.units[unit_id] as UnitDef
+	_append_log("%s で %s の生産を登録しました。" % [region.def.display_name, tr(String(unit_def.display_name_key))])
 	_update_info_panel()
 	_update_turn_ui()
 
-## Every queued job builds in parallel (see TurnManager._advance_production),
-## so each gets its own "remaining turns" line rather than one number for
-## a single active job plus a waiting list.
+## Shows the facility FIFO in registration order and the accumulated production
+## value for each job.
 func _build_queue_text(region: Region) -> String:
-	if region.pending_production.is_empty():
+	var facility_ids := GameState.production_facility_ids_for_region(region.def.id)
+	if facility_ids.is_empty():
+		return "生産施設: なし"
+	var queue := GameState.campaign_runtime.production_queues_by_facility_id.get(facility_ids[0]) as ProductionQueueState
+	if queue == null or queue.job_ids.is_empty():
 		return "生産キュー: なし"
-	var lines: Array = []
-	for job in region.pending_production:
-		var udef: UnitType = GameState.unit_defs[job["unit_type_id"]]
-		lines.append("%s（残り%dターン）" % [udef.display_name, job["turns_remaining"]])
-	return "生産中:\n" + "\n".join(lines)
+	var lines: Array[String] = []
+	for job_id: StringName in queue.job_ids:
+		var job := GameState.campaign_runtime.production_jobs_by_id[job_id] as ProductionJobState
+		var unit_def := GameState.master_data.units[job.unit_def_id] as UnitDef
+		lines.append("%s（%d/%d）" % [tr(String(unit_def.display_name_key)), job.production_accumulated, job.production_required])
+	return "生産キュー:\n" + "\n".join(lines)
 
 func _on_move_pressed() -> void:
-	if _selected_region_id == &"":
+	if _selected_region_id == &"" or _squad_option.selected < 0:
 		return
 	var region: Region = GameState.regions[_selected_region_id]
 	var idx := _move_option.selected
 	if idx < 0:
 		return
 	var dest_id: StringName = _move_option.get_item_metadata(idx)
-	region.pending_move_order = dest_id
+	var squad_id: StringName = _squad_option.get_item_metadata(_squad_option.selected)
+	var errors := GameState.plan_squad_movement(squad_id, dest_id, GameState.player_faction_id)
+	if not errors.is_empty():
+		_append_log("移動命令に失敗しました: %s" % errors[0])
+		return
+	_update_info_panel()
 	_append_log("%s の艦隊に %s への移動を命令しました。" % [region.def.display_name, GameState.region_defs[dest_id].display_name])
 
+
+func _on_formation_pressed() -> void:
+	if _squad_option.selected < 0:
+		return
+	var squad_id: StringName = _squad_option.get_item_metadata(_squad_option.selected)
+	_open_formation_dialog(squad_id)
+
+
+func _open_formation_dialog(squad_id: StringName) -> void:
+	var squad := GameState.campaign_runtime.get_squad(squad_id)
+	if squad == null:
+		return
+	var window := Window.new()
+	window.title = "部隊編成 - %s" % squad.display_name
+	window.size = Vector2i(720, 440)
+	window.transient = true
+	window.exclusive = true
+	window.close_requested.connect(window.queue_free)
+	add_child(window)
+
+	var panel := VBoxContainer.new()
+	panel.position = Vector2(18, 18)
+	panel.size = Vector2(684, 404)
+	panel.add_theme_constant_override("separation", 8)
+	window.add_child(panel)
+	var help := Label.new()
+	help.text = "スロット変更、選択機の分割、同一地域の部隊統合ができます。"
+	panel.add_child(help)
+
+	var split_checks: Array[CheckButton] = []
+	for slot_index in range(GameConstants.MAX_UNITS_PER_SQUAD):
+		var row := HBoxContainer.new()
+		panel.add_child(row)
+		var unit_id := squad.get_unit_at_slot(slot_index)
+		var check := CheckButton.new()
+		check.disabled = unit_id.is_empty()
+		check.text = "分割" if not unit_id.is_empty() else "空き"
+		check.set_meta("unit_id", unit_id)
+		row.add_child(check)
+		split_checks.append(check)
+		var label := Label.new()
+		label.custom_minimum_size = Vector2(260, 0)
+		if unit_id.is_empty():
+			label.text = "Slot %d: ---" % slot_index
+		else:
+			var unit := GameState.campaign_runtime.get_unit(unit_id)
+			var unit_def := GameState.master_data.units.get(unit.unit_def_id) as UnitDef
+			label.text = "Slot %d: %s" % [slot_index, tr(String(unit_def.display_name_key))]
+		row.add_child(label)
+		var slot_option := OptionButton.new()
+		for candidate in range(GameConstants.MAX_UNITS_PER_SQUAD):
+			slot_option.add_item("Slot %d" % candidate)
+			slot_option.set_item_disabled(candidate, candidate != slot_index and not squad.get_unit_at_slot(candidate).is_empty())
+		slot_option.select(slot_index)
+		slot_option.disabled = unit_id.is_empty()
+		if not unit_id.is_empty():
+			slot_option.item_selected.connect(func(new_slot: int):
+				var errors := GameState.campaign_runtime.move_unit_to_slot(squad_id, unit_id, new_slot)
+				window.queue_free()
+				if not errors.is_empty(): _append_log("スロット変更に失敗しました: %s" % errors[0])
+				_update_info_panel()
+			)
+		row.add_child(slot_option)
+		if not unit_id.is_empty():
+			var en_button := Button.new()
+			en_button.text = "EN補給"
+			en_button.pressed.connect(func():
+				var errors := GameState.resupply_unit_en(unit_id, GameState.player_faction_id)
+				if not errors.is_empty(): _append_log("EN補給に失敗しました: %s" % errors[0])
+				else: _append_log("ENを最大まで補給しました。")
+			)
+			row.add_child(en_button)
+			var repair_button := Button.new()
+			repair_button.text = "修理開始"
+			repair_button.pressed.connect(func():
+				var result := GameState.start_unit_repair(unit_id, GameState.player_faction_id)
+				if not result.errors.is_empty(): _append_log("修理開始に失敗しました: %s" % result.errors[0])
+				else: _append_log("修理を開始しました（%dターン）。" % result.turns)
+				window.queue_free()
+				_update_info_panel()
+			)
+			row.add_child(repair_button)
+
+	var split_button := Button.new()
+	split_button.text = "選択した機体を新部隊へ分割"
+	split_button.pressed.connect(func():
+		var selected_units: Array[StringName] = []
+		for check in split_checks:
+			if check.button_pressed: selected_units.append(StringName(check.get_meta("unit_id")))
+		var result := GameState.campaign_runtime.split_squad(squad_id, selected_units, "%s 分遣隊" % squad.display_name)
+		if not result.errors.is_empty(): _append_log("部隊分割に失敗しました: %s" % result.errors[0])
+		window.queue_free()
+		_update_info_panel()
+	)
+	panel.add_child(split_button)
+
+	var merge_option := OptionButton.new()
+	for other: SquadState in GameState.campaign_runtime.get_squads_in_region(squad.region_id, squad.owner_faction_id):
+		if other.squad_id != squad_id:
+			merge_option.add_item("%s (%d機)" % [other.display_name, other.unit_instance_ids.size()])
+			merge_option.set_item_metadata(merge_option.item_count - 1, other.squad_id)
+	panel.add_child(merge_option)
+	var merge_button := Button.new()
+	merge_button.text = "選択部隊を統合"
+	merge_button.disabled = merge_option.item_count == 0
+	merge_button.pressed.connect(func():
+		var source_id: StringName = merge_option.get_item_metadata(merge_option.selected)
+		var errors := GameState.campaign_runtime.merge_squads(squad_id, source_id)
+		if not errors.is_empty(): _append_log("部隊統合に失敗しました: %s" % errors[0])
+		window.queue_free()
+		_update_info_panel()
+	)
+	panel.add_child(merge_button)
+	window.popup_centered()
+
 func _on_end_turn_pressed() -> void:
-	if GameState.is_game_over:
+	if GameState.is_game_over or TurnManager.is_resolving_turn or TurnManager.active_faction_id != GameState.player_faction_id:
 		return
 	TurnManager.commit_turn()
 
 func _on_development_pressed() -> void:
-	if GameState.is_game_over:
+	if GameState.is_game_over or TurnManager.is_resolving_turn or TurnManager.active_faction_id != GameState.player_faction_id or TurnManager.current_phase != TurnManager.Phase.ORDERS:
 		return
 	var panel := DevelopmentPanel.new()
 	add_child(panel)
 	panel.setup(GameState.player_faction_id)
 
-func _on_battle_ready_for_vignette(entry: Dictionary) -> void:
-	var vignette := BattleVignette.new()
-	add_child(vignette)
-	vignette.setup(entry)
-	vignette.dismissed.connect(func(): TurnManager.vignette_dismissed.emit())
-
 func _on_turn_events_ready(summary: String) -> void:
 	if not summary.is_empty():
 		_append_log(summary)
+
+func _on_squad_battles_detected(battles: Array[Dictionary]) -> void:
+	var names: Array[String] = []
+	for battle: Dictionary in battles:
+		var region_def := GameState.region_defs.get(battle.region_id) as RegionDef
+		names.append(region_def.display_name if region_def != null else String(battle.region_id))
+	_append_log("戦闘待機地域: %s（RTS戦闘実装後に解決）" % ", ".join(names))
+
+func _on_battle_runtime_ready(battle: BattleRuntimeState) -> void:
+	var view := BattlePrototypeView.new()
+	view.setup(battle)
+	add_child(view)
 
 func _on_phase_changed(_phase) -> void:
 	_update_turn_ui()
 	_update_info_panel()
 	_flash_label(_phase_label)
+
+func _on_active_faction_changed(_faction_id: StringName, _index: int) -> void:
+	_update_turn_ui()
+	_update_info_panel()
+	_refresh_all_region_colors()
+	_refresh_all_region_badges()
+
+func _on_supply_network_changed(_faction_id: StringName) -> void:
+	_update_info_panel()
 
 ## Brief color pulse so turn/phase changes register as an event instead
 ## of the label just silently changing text.
@@ -503,11 +686,19 @@ func _on_turn_advanced(_turn_number: int) -> void:
 func _update_turn_ui() -> void:
 	_turn_label.text = "ターン %d / %d" % [GameState.turn_number, GameState.campaign_config.turn_cap]
 	var phase_names := ["収入", "命令", "移動", "戦闘", "外交", "勝利判定"]
-	var text := "フェーズ: %s" % phase_names[TurnManager.current_phase]
+	var active_name := "---"
+	var active_def := GameState.faction_defs.get(TurnManager.active_faction_id) as FactionDef
+	if active_def != null:
+		active_name = active_def.display_name
+	var text := "行動勢力: %s  /  フェーズ: %s" % [active_name, phase_names[TurnManager.current_phase]]
 	var faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	if faction:
-		text += "  ｜  資源: %d" % faction.resources
+		text += "  ｜  資金: %d  物資: %d  研究資源: %d" % [faction.funds, faction.materials, faction.resources]
 	_phase_label.text = text
+	var player_orders := TurnManager.active_faction_id == GameState.player_faction_id and TurnManager.current_phase == TurnManager.Phase.ORDERS and not TurnManager.is_resolving_turn
+	_development_button.disabled = not player_orders
+	_end_turn_button.disabled = not player_orders
+	_end_turn_button.text = "行動終了" if player_orders else "AI行動中"
 	_refresh_all_region_badges()
 
 func _append_log(text: String) -> void:

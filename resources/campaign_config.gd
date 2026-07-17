@@ -3,6 +3,7 @@ extends Resource
 
 @export var turn_cap: int = 24
 @export var victory_region_threshold_pct: float = 0.6
+@export var faction_turn_order: Array[StringName] = []
 
 ## Index i = cost/turns to research from tier i to tier i+1. Array length
 ## determines the max tech tier (2 entries = tiers 0,1,2 reachable).

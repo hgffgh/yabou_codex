@@ -1,0 +1,36 @@
+[gd_resource type="Resource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://resources/unit_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/units/vanguard_frame.svg" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/units/placeholder_unit_model.tscn" id="3"]
+
+[resource]
+script = ExtResource("1")
+id = &"nova_vanguard"
+display_name_key = &"unit.nova_vanguard.name"
+description_key = &"unit.nova_vanguard.description"
+faction_origin_id = &"nova_republic"
+size = 1
+role = 0
+icon = ExtResource("2")
+model_scene = ExtResource("3")
+vignette_sprite = ExtResource("2")
+max_hp = 2200
+max_en = 360
+firepower = 260
+armor = 180
+speed = 120
+evasion = 18
+ground_aptitude = 1
+space_aptitude = 0
+moon_aptitude = 1
+ballistic_damage_multiplier = 0.75
+beam_damage_multiplier = 1.25
+melee_damage_multiplier = 1.0
+weapon_ids = Array[StringName]([&"beam_rifle"])
+support_skill_ids = Array[StringName]([])
+sensor_range_m = 150.0
+sensor_ignores_obstacles = false
+capture_allowed = true
+power_adjustment = 1.0
+tech_id = &"prototype_foundation"

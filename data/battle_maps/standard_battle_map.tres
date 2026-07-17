@@ -1,0 +1,16 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://resources/battle_map_def.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/battle/maps/standard_battle_map.tscn" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"standard_battle_map"
+scene = ExtResource("2")
+world_size_m = Vector2(1200, 900)
+attacker_spawn_transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -400, 0, 0)
+defender_spawn_transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 400, 0, 0)
+attacker_hq_id = &"standard_attacker_hq"
+defender_hq_id = &"standard_defender_hq"
+control_point_ids = Array[StringName]([&"standard_relay"])
+

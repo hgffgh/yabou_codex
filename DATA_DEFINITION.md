@@ -345,7 +345,7 @@ enum EventEffectType {
 | `current_en` | `int` | 0〜最大EN |
 | `pilot_id` | `StringName` | 固有パイロット。一般兵は空ID |
 | `squad_id` | `StringName` | 所属部隊 |
-| `slot_index` | `int` | 0〜4 |
+| `slot_index` | `int` | 未配属時は-1。部隊配属時は0〜4 |
 | `condition` | `UnitCondition` | 稼働・修理・回収大破 |
 | `repair_turns_remaining` | `int` | 修理中のみ1以上 |
 | `movement_used` | `bool` | 分割統合後も維持する移動済み |
@@ -487,7 +487,14 @@ enum EventEffectType {
 | `planned_destination_region_id` | `StringName` | 戦略フェイズ移動先 |
 | `intel_revision` | `int` | 編成変更毎に加算。敵記録無効化用 |
 
-### 14.1 検証
+### 14.1 機体個体・部隊IDの生成
+
+- 機体個体IDは`unit_<連番>`、部隊IDは`squad_<連番>`の形式で生成する。
+- 生成時は保存済みの`next_unit_serial`または`next_squad_serial`を使用し、生成後に対応する値を1加算する。
+- 連番はキャンペーン乱数から分離し、機体個体や部隊を削除しても再利用しない。
+- セーブのロード後も保存された次回連番から生成を再開し、既存IDと衝突させない。
+
+### 14.2 検証
 
 - 機体数1〜5。0機になった部隊は削除する。
 - すべての機体の所有勢力・地域・`squad_id`が一致する。
@@ -557,6 +564,10 @@ enum EventEffectType {
 | `funds_paid` | `int` | 先払い額 |
 | `materials_paid` | `int` | 先払い額 |
 | `registered_turn` | `int` | 表示用 |
+
+生産ジョブIDは`production_job_<8桁連番>`で生成する。次回連番は
+`next_production_job_serial`として保存し、キャンペーン乱数から分離する。
+完了・施設喪失で削除したIDは再利用しない。
 
 - キャンセル・一時停止不可。
 - キュー並べ替え可能。
@@ -688,6 +699,10 @@ enum EventEffectType {
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
 | `unit_instance_id` | `StringName` | 戦略個体参照 |
+| `initial_hp` | `int` | 戦闘開始時HP。戦略状態へ途中経過を漏らさないため保持 |
+| `initial_en` | `int` | 戦闘開始時EN |
+| `current_hp` | `int` | 戦闘中HP。結果適用時だけ戦略個体へ反映 |
+| `current_en` | `int` | 戦闘中EN。結果適用時だけ戦略個体へ反映 |
 | `action_gauge` | `float` | 0〜100 |
 | `post_action_delay_sec` | `float` | 0以上 |
 | `defending` | `bool` | 装甲＋20・回避＋10 |
@@ -835,6 +850,9 @@ manual_flawless_victory
 | `active_faction_index` | `int` | 固定順序の位置 |
 | `phase` | `StrategicPhase` | 手動保存はSTRATEGYのみ |
 | `rng_state` | `int` | キャンペーン乱数 |
+| `next_unit_serial` | `int` | 次に生成する機体個体IDの連番。乱数と分離し、削除後も再利用しない |
+| `next_squad_serial` | `int` | 次に生成する部隊IDの連番。乱数と分離し、削除後も再利用しない |
+| `next_production_job_serial` | `int` | 次に生成する生産ジョブIDの連番。乱数と分離し、削除後も再利用しない |
 | `faction_states` | `Array[Dictionary]` | 各勢力 |
 | `region_states` | `Array[Dictionary]` | 全エリア |
 | `unit_states` | `Array[Dictionary]` | 全機体個体 |

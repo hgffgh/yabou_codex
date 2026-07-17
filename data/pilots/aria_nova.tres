@@ -1,0 +1,28 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://resources/pilot_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/ui/emblems/nova_republic.svg" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"aria_nova"
+display_name_key = &"pilot.aria_nova.name"
+description_key = &"pilot.aria_nova.description"
+faction_id = &"nova_republic"
+portrait = ExtResource("2")
+initial_level = 8
+initial_shooting = 125
+initial_melee = 95
+initial_defense = 105
+initial_reaction = 130
+initial_command = 115
+growth_shooting = 2
+growth_melee = 1
+growth_defense = 1
+growth_reaction = 2
+growth_command = 2
+skill_ids = Array[StringName]([])
+preferred_unit_ids = Array[StringName]([&"nova_scout", &"nova_vanguard"])
+poor_unit_ids = Array[StringName]([&"crimson_bastion"])
+exclusive_unit_ids = Array[StringName]([])
+relationship_tags = Array[StringName]([&"nova_officer"])

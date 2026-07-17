@@ -1,0 +1,36 @@
+[gd_resource type="Resource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://resources/unit_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/units/titan_frame.svg" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/units/placeholder_unit_model.tscn" id="3"]
+
+[resource]
+script = ExtResource("1")
+id = &"crimson_bastion"
+display_name_key = &"unit.crimson_bastion.name"
+description_key = &"unit.crimson_bastion.description"
+faction_origin_id = &"crimson_empire"
+size = 2
+role = 1
+icon = ExtResource("2")
+model_scene = ExtResource("3")
+vignette_sprite = ExtResource("2")
+max_hp = 4800
+max_en = 420
+firepower = 320
+armor = 560
+speed = 60
+evasion = 5
+ground_aptitude = 0
+space_aptitude = 1
+moon_aptitude = 0
+ballistic_damage_multiplier = 1.25
+beam_damage_multiplier = 1.0
+melee_damage_multiplier = 0.5
+weapon_ids = Array[StringName]([&"siege_cannon"])
+support_skill_ids = Array[StringName]([&"field_repair"])
+sensor_range_m = 150.0
+sensor_ignores_obstacles = false
+capture_allowed = true
+power_adjustment = 1.0
+tech_id = &"prototype_foundation"

@@ -2,8 +2,8 @@ class_name DevelopmentPanel
 extends CanvasLayer
 ## The faction-wide "development" command (per the original series' overall
 ## command menu, not a per-region build item) — advances the player's
-## tech_tier, unlocking higher-tier units everywhere. Same overlay pattern
-## as BattleVignette (own CanvasLayer, dim background, centered card).
+## tech_tier, unlocking higher-tier units everywhere. Own CanvasLayer, dim
+## background, centered card.
 
 signal closed
 

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/battle_control_point_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"standard_relay"
+position = Vector3(0, 0, 0)
+capture_radius_m = 60.0
+

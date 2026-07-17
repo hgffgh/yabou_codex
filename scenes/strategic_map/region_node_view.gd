@@ -67,7 +67,7 @@ func setup(id: StringName, region: Region, color: Color) -> void:
 	_badge_count_label.visible = false
 	add_child(_badge_count_label)
 
-	update_unit_badge()
+	update_squad_badge()
 	queue_redraw()
 
 func set_owner_color(color: Color) -> void:
@@ -88,17 +88,26 @@ func set_selected(selected: bool) -> void:
 ## Badge showing the dominant unit type stationed here (by count) plus a
 ## total count, so the player can see WHAT is garrisoned where, not just
 ## THAT something is — a plain number badge didn't answer "which unit?"
-func update_unit_badge() -> void:
+func update_squad_badge() -> void:
 	var total := 0
 	var dominant_id: StringName = &""
+	var counts_by_unit_def_id: Dictionary = {}
+	for squad: SquadState in GameState.campaign_runtime.get_squads_in_region(region_id):
+		for unit_instance_id: StringName in squad.unit_instance_ids:
+			var unit := GameState.campaign_runtime.get_unit(unit_instance_id) as UnitInstanceState
+			if unit == null:
+				continue
+			total += 1
+			counts_by_unit_def_id[unit.unit_def_id] = int(counts_by_unit_def_id.get(unit.unit_def_id, 0)) + 1
+
 	var dominant_count := -1
-	for stack in region_ref.stacks.values():
-		for uid in stack.units:
-			var count: int = stack.units[uid]
-			total += count
-			if count > dominant_count:
-				dominant_count = count
-				dominant_id = uid
+	var sorted_unit_def_ids := counts_by_unit_def_id.keys()
+	sorted_unit_def_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for unit_def_id: StringName in sorted_unit_def_ids:
+		var count: int = counts_by_unit_def_id[unit_def_id]
+		if count > dominant_count:
+			dominant_count = count
+			dominant_id = unit_def_id
 
 	if total <= 0:
 		_badge_icon.visible = false
@@ -106,13 +115,17 @@ func update_unit_badge() -> void:
 	else:
 		_badge_count_label.visible = true
 		_badge_count_label.text = str(total) if total < 100 else "99+"
-		var udef: UnitType = GameState.unit_defs.get(dominant_id)
+		var udef := GameState.master_data.units.get(dominant_id) as UnitDef
 		if udef and udef.icon:
 			_badge_icon.texture = udef.icon
 			_badge_icon.visible = true
 		else:
 			_badge_icon.visible = false
 	queue_redraw()
+
+## Compatibility entry point: this renders new SquadState data only.
+func update_unit_badge() -> void:
+	update_squad_badge()
 
 func _on_mouse_entered() -> void:
 	is_hovered = true
@@ -144,7 +157,7 @@ func _draw() -> void:
 	else:
 		_draw_terrain_accent()
 
-	if _badge_icon and _badge_icon.visible:
+	if _badge_count_label and _badge_count_label.visible:
 		draw_circle(BADGE_OFFSET, BADGE_RADIUS, Color(0.1, 0.1, 0.13, 0.95))
 		draw_arc(BADGE_OFFSET, BADGE_RADIUS, 0, TAU, 20, Color.WHITE, 1.5)
 		# Small dark pill behind the count so it stays legible over the icon.

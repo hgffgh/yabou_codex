@@ -1,0 +1,26 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/weapon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"beam_rifle"
+display_name_key = &"weapon.beam_rifle.name"
+weapon_class = 1
+damage_attribute = 1
+action_type = 0
+total_power = 480
+hit_count = 2
+penetration = 220
+base_accuracy_pct = 85
+base_critical_pct = 10
+en_cost = 50
+post_action_delay_sec = 2.5
+min_range_m = 20.0
+max_range_m = 150.0
+target_rule = 3
+target_pattern = 0
+can_target_front = true
+can_target_rear = true
+ignores_cover = false
+is_giftable = true

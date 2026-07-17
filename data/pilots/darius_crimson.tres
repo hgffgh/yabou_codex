@@ -1,0 +1,28 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://resources/pilot_def.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/ui/emblems/crimson_empire.svg" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"darius_crimson"
+display_name_key = &"pilot.darius_crimson.name"
+description_key = &"pilot.darius_crimson.description"
+faction_id = &"crimson_empire"
+portrait = ExtResource("2")
+initial_level = 10
+initial_shooting = 115
+initial_melee = 110
+initial_defense = 135
+initial_reaction = 90
+initial_command = 125
+growth_shooting = 1
+growth_melee = 1
+growth_defense = 2
+growth_reaction = 1
+growth_command = 2
+skill_ids = Array[StringName]([])
+preferred_unit_ids = Array[StringName]([&"crimson_bastion"])
+poor_unit_ids = Array[StringName]([&"nova_scout"])
+exclusive_unit_ids = Array[StringName]([])
+relationship_tags = Array[StringName]([&"crimson_officer"])

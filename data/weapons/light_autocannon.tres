@@ -1,0 +1,26 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/weapon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"light_autocannon"
+display_name_key = &"weapon.light_autocannon.name"
+weapon_class = 0
+damage_attribute = 0
+action_type = 0
+total_power = 240
+hit_count = 4
+penetration = 70
+base_accuracy_pct = 90
+base_critical_pct = 15
+en_cost = 20
+post_action_delay_sec = 1.0
+min_range_m = 0.0
+max_range_m = 60.0
+target_rule = 0
+target_pattern = 0
+can_target_front = true
+can_target_rear = true
+ignores_cover = false
+is_giftable = true

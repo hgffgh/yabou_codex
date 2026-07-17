@@ -6,19 +6,26 @@ extends Node
 enum Phase { INCOME, ORDERS, MOVEMENT, COMBAT, DIPLOMACY, VICTORY_CHECK }
 
 signal phase_changed(phase: Phase)
-## Emitted once per player-involved battle so the UI can play a vignette.
-## commit_turn() awaits vignette_dismissed before moving on, so battles are
-## shown one at a time; AI-vs-AI battles never emit this (resolved silently).
-signal battle_ready_for_vignette(entry: Dictionary)
-signal vignette_dismissed
 ## Short human-readable line about AI-vs-AI activity the player didn't see
-## a vignette for (world keeps moving even off-screen). Empty string means
+## directly (world keeps moving even off-screen). Empty string means
 ## nothing notable happened this turn.
 signal turn_events_ready(summary: String)
 signal research_completed(faction_id: StringName, new_tier: int)
 
 var current_phase: Phase = Phase.INCOME
 var last_combat_log: Array = []  # this turn's auto-captures/battles, for logging/UI
+var faction_turn_order: Array[StringName] = []
+var active_faction_index: int = 0
+var active_faction_id: StringName = &""
+var is_resolving_turn: bool = false
+
+signal active_faction_changed(faction_id: StringName, index: int)
+signal squad_battles_detected(battles: Array[Dictionary])
+signal battle_runtime_ready(battle: BattleRuntimeState)
+signal battle_runtime_finished(battle_id: StringName)
+var pending_squad_battles: Array[Dictionary] = []
+var pending_battle_states: Array[BattleRuntimeState] = []
+var next_battle_serial: int = 1
 
 ## Global "development" command (per the original series' overall-menu
 ## research command, not a per-region build item). Returns false if the
@@ -39,50 +46,81 @@ func start_research(faction_id: StringName) -> bool:
 	faction.research_turns_remaining = config.research_turns[faction.tech_tier]
 	return true
 
-func _advance_research() -> void:
+func _advance_research(faction_id: StringName) -> void:
 	var config: CampaignConfig = GameState.campaign_config
-	for fid in GameState.factions:
-		var faction: Faction = GameState.factions[fid]
-		if not faction.research_in_progress:
-			continue
-		faction.research_turns_remaining -= 1
-		if faction.research_turns_remaining <= 0:
-			faction.tech_tier += 1
-			faction.research_in_progress = false
-			research_completed.emit(fid, faction.tech_tier)
+	var faction: Faction = GameState.get_faction(faction_id)
+	if faction == null or not faction.research_in_progress:
+		return
+	faction.research_turns_remaining -= 1
+	if faction.research_turns_remaining <= 0:
+		faction.tech_tier += 1
+		faction.research_in_progress = false
+		research_completed.emit(faction_id, faction.tech_tier)
 
 func start_new_game(player_faction_id: StringName) -> void:
+	is_resolving_turn = false
+	pending_battle_states.clear()
+	next_battle_serial = 1
 	GameState.start_new_game(player_faction_id)
-	_begin_turn()
+	_build_faction_turn_order(player_faction_id)
+	active_faction_index = 0
+	_begin_faction_turn()
 
-func _begin_turn() -> void:
+func _build_faction_turn_order(player_faction_id: StringName) -> void:
+	faction_turn_order.clear()
+	faction_turn_order.append(player_faction_id)
+	for faction_id: StringName in GameState.campaign_config.faction_turn_order:
+		if faction_id != player_faction_id and GameState.factions.has(faction_id):
+			faction_turn_order.append(faction_id)
+	var remaining := GameState.factions.keys()
+	remaining.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for faction_id: StringName in remaining:
+		if not faction_turn_order.has(faction_id):
+			faction_turn_order.append(faction_id)
+
+func _begin_faction_turn() -> void:
+	active_faction_id = faction_turn_order[active_faction_index]
+	active_faction_changed.emit(active_faction_id, active_faction_index)
+	GameState.campaign_runtime.reset_movement_for_faction(active_faction_id)
 	_set_phase(Phase.INCOME)
-	_run_income_phase()
+	_run_income_phase(active_faction_id)
+	GameState.advance_repairs_for_faction(active_faction_id)
 	_set_phase(Phase.ORDERS)
-	# Waits here: the player issues per-region orders directly against
-	# GameState/Region from the StrategicMap UI, then calls commit_turn().
 
 ## Called by the StrategicMap UI's "End Turn" button.
 func commit_turn() -> void:
-	if GameState.is_game_over:
+	if GameState.is_game_over or is_resolving_turn or active_faction_id != GameState.player_faction_id or current_phase != Phase.ORDERS:
 		return
-	_run_ai_orders()
+	is_resolving_turn = true
+	await _finish_active_faction_turn()
+	while not GameState.is_game_over:
+		active_faction_index += 1
+		if active_faction_index >= faction_turn_order.size():
+			_run_diplomacy_week_end()
+			if _run_victory_check(true):
+				return
+			GameState.advance_turn()
+			active_faction_index = 0
+			_begin_faction_turn()
+			is_resolving_turn = false
+			return
+		_begin_faction_turn()
+		var faction := GameState.get_faction(active_faction_id) as Faction
+		if faction == null or faction.eliminated:
+			continue
+		AiController.decide_orders(active_faction_id)
+		await _finish_active_faction_turn()
+
+func _finish_active_faction_turn() -> void:
 	_set_phase(Phase.MOVEMENT)
-	_run_movement_phase()
+	_run_movement_phase(active_faction_id)
 	_set_phase(Phase.COMBAT)
-	_run_combat_phase()
-	for entry in last_combat_log:
-		if entry["type"] == "battle" and _involves_player(entry):
-			battle_ready_for_vignette.emit(entry)
-			await vignette_dismissed
+	await _run_combat_phase()
 	turn_events_ready.emit(_build_world_events_summary())
 	_set_phase(Phase.DIPLOMACY)
-	_run_diplomacy_phase()
+	Diplomacy.apply_combat_events(last_combat_log)
 	_set_phase(Phase.VICTORY_CHECK)
-	if _run_victory_check():
-		return
-	GameState.advance_turn()
-	_begin_turn()
+	_run_victory_check(false)
 
 func _involves_player(entry: Dictionary) -> bool:
 	return entry["attacker_id"] == GameState.player_faction_id or entry["defender_id"] == GameState.player_faction_id
@@ -91,30 +129,25 @@ func _set_phase(phase: Phase) -> void:
 	current_phase = phase
 	phase_changed.emit(phase)
 
-func _run_income_phase() -> void:
+func _run_income_phase(faction_id: StringName) -> void:
 	for region in GameState.regions.values():
-		_advance_production(region)
-		if region.owner_faction_id == &"":
+		if region.owner_faction_id != faction_id:
 			continue
-		var faction: Faction = GameState.get_faction(region.owner_faction_id)
+		GameState.advance_region_production(region.def.id)
+		var faction: Faction = GameState.get_faction(faction_id)
 		if faction:
 			faction.resources += region.def.resource_yield
-	_advance_research()
-
-## Every queued job builds in parallel, each ticking down on its own
-## build_time_turns clock independently — a region with 3 units queued at
-## once finishes each exactly when its own timer runs out, not staggered
-## behind each other.
-func _advance_production(region: Region) -> void:
-	var still_building := []
-	for job in region.pending_production:
-		job["turns_remaining"] -= 1
-		if job["turns_remaining"] <= 0:
-			var stack := region.get_or_create_stack(region.owner_faction_id)
-			stack.add_units(job["unit_type_id"], 1)
-		else:
-			still_building.append(job)
-	region.pending_production = still_building
+			faction.funds += region.def.base_funds_income
+			faction.materials += region.def.base_materials_income
+			for facility_id: StringName in region.def.facility_instance_ids:
+				var instance := GameState.master_data.facility_instances.get(facility_id) as FacilityInstanceDef
+				if instance == null:
+					continue
+				var facility_def := GameState.master_data.facility_defs.get(instance.facility_def_id) as FacilityDef
+				if facility_def != null:
+					faction.funds += facility_def.funds_income
+					faction.materials += facility_def.materials_income
+	_advance_research(faction_id)
 
 func _run_ai_orders() -> void:
 	for fid in GameState.factions:
@@ -122,105 +155,95 @@ func _run_ai_orders() -> void:
 		if faction.is_ai_controlled and not faction.eliminated:
 			AiController.decide_orders(fid)
 
-func _run_movement_phase() -> void:
-	for region in GameState.regions.values():
-		if region.pending_move_order == &"":
-			continue
-		var dest_id: StringName = region.pending_move_order
-		region.pending_move_order = &""
-		var dest: Region = GameState.get_region(dest_id)
-		if dest == null or not region.def.neighbor_ids.has(dest_id):
-			continue
-		for faction_id in region.stacks.keys():
-			var source_stack: UnitStack = region.stacks[faction_id]
-			if source_stack.is_empty():
-				continue
-			var dest_stack := dest.get_or_create_stack(faction_id)
-			for unit_id in source_stack.units:
-				dest_stack.add_units(unit_id, source_stack.units[unit_id])
-			source_stack.units.clear()
+func _run_movement_phase(faction_id: StringName) -> void:
+	GameState.campaign_runtime.execute_planned_squad_movements(faction_id)
 
 func _run_combat_phase() -> void:
 	last_combat_log = []
-	for region in GameState.regions.values():
-		var occupants: Array = region.occupying_faction_ids()
-		if occupants.is_empty():
-			continue
-
-		var hostile_occupants: Array = []
-		for fid in occupants:
-			if fid != region.owner_faction_id:
-				hostile_occupants.append(fid)
-		if hostile_occupants.is_empty():
-			continue
-
-		var attacker_id: StringName = _strongest_faction(hostile_occupants, region)
-
-		if region.owner_faction_id == &"":
-			var others: Array = []
-			for fid in hostile_occupants:
-				if fid != attacker_id:
-					others.append(fid)
-			if others.is_empty():
-				_auto_capture(region, attacker_id)
-			else:
-				var defender_id: StringName = _strongest_faction(others, region)
-				_resolve_combat(region, attacker_id, defender_id)
+	pending_squad_battles.clear()
+	pending_battle_states.clear()
+	for entry: Dictionary in GameState.detect_squad_conflicts(active_faction_id):
+		if entry.type == "auto_capture":
+			last_combat_log.append(entry)
 		else:
-			var defender_stack: UnitStack = region.stacks.get(region.owner_faction_id)
-			if defender_stack == null or defender_stack.is_empty():
-				_auto_capture(region, attacker_id)
-			else:
-				_resolve_combat(region, attacker_id, region.owner_faction_id)
+			pending_squad_battles.append(entry)
+	if not pending_squad_battles.is_empty():
+		squad_battles_detected.emit(pending_squad_battles)
+		for pending: Dictionary in pending_squad_battles:
+			if pending.type == "squad_battle_pending":
+				await _resolve_squad_battle(pending)
+			elif pending.type == "multi_faction_battle_pending":
+				await _resolve_multi_faction_battle(pending)
 
-func _strongest_faction(candidate_ids: Array, region: Region) -> StringName:
-	var best_id: StringName = candidate_ids[0]
-	var best_power := -1.0
-	for fid in candidate_ids:
-		var stack: UnitStack = region.stacks.get(fid)
-		var faction: Faction = GameState.get_faction(fid)
-		var power := CombatResolver.stack_power(stack, true, faction, region)
-		if power > best_power:
-			best_power = power
-			best_id = fid
-	return best_id
+## A region with two or more distinct hostile defending factions can't be
+## represented by the single-attacker/single-defender BattleRuntimeState
+## model, so it is resolved as a sequence of pairwise battles against each
+## defending faction in turn. Squad membership is re-derived from the live
+## campaign state before each sub-battle so attrition from an earlier fight
+## (or a wiped-out attacker) carries forward correctly.
+func _resolve_multi_faction_battle(pending: Dictionary) -> void:
+	# apply_battle_result unconditionally clears every participant's
+	# move_origin_region_id once its battle finishes, since it normally
+	# assumes a squad fights at most once per turn. A surviving attacker
+	# fighting a second defender still needs that retreat origin for
+	# BattleRuntimeFactory's validation, so it is restored before each
+	# sub-battle from a snapshot taken before the sequence starts.
+	var retreat_origin_by_squad_id: Dictionary = {}
+	for squad_id: StringName in pending.attacker_squad_ids:
+		var squad := GameState.campaign_runtime.get_squad(squad_id)
+		if squad != null:
+			retreat_origin_by_squad_id[squad_id] = squad.move_origin_region_id
+	for defender_id: StringName in pending.defender_faction_ids:
+		for squad_id: StringName in retreat_origin_by_squad_id:
+			var squad := GameState.campaign_runtime.get_squad(squad_id)
+			if squad != null and squad.move_origin_region_id.is_empty():
+				squad.move_origin_region_id = retreat_origin_by_squad_id[squad_id]
+		var attacker_squad_ids := GameState.combat_capable_squad_ids_in_region(pending.region_id, pending.attacker_id)
+		if attacker_squad_ids.is_empty():
+			break
+		var defender_squad_ids := GameState.combat_capable_squad_ids_in_region(pending.region_id, defender_id)
+		if defender_squad_ids.is_empty():
+			continue
+		await _resolve_squad_battle({
+			"type": "squad_battle_pending", "region_id": pending.region_id,
+			"attacker_id": pending.attacker_id, "defender_id": defender_id,
+			"attacker_squad_ids": attacker_squad_ids, "defender_squad_ids": defender_squad_ids,
+		})
 
-func _auto_capture(region: Region, faction_id: StringName) -> void:
-	GameState.set_region_owner(region.def.id, faction_id)
-	last_combat_log.append({"region_id": region.def.id, "type": "auto_capture", "faction_id": faction_id})
+func _resolve_squad_battle(pending: Dictionary) -> void:
+	var battle_id := StringName("battle_%08d" % next_battle_serial)
+	next_battle_serial += 1
+	var region_def := GameState.region_defs[pending.region_id] as RegionDef
+	var battle_map := GameState.master_data.battle_maps.get(region_def.battle_map_id) as BattleMapDef
+	var created := BattleRuntimeFactory.new().create_from_pending(
+		pending, GameState.campaign_runtime, battle_id, hash(String(battle_id)),
+		Vector3(-400.0, 0.0, 0.0), Vector3(400.0, 0.0, 0.0),
+		battle_map,
+	)
+	if created.errors.is_empty():
+		var battle := created.state as BattleRuntimeState
+		pending_battle_states.append(battle)
+		battle_runtime_ready.emit(battle)
+		await battle_runtime_finished
+		if battle.result != null:
+			last_combat_log.append({
+				"type": "battle",
+				"region_id": battle.region_id,
+				"attacker_id": battle.attacker_faction_id,
+				"defender_id": battle.defender_faction_id,
+				"winner_id": battle.result.winner_faction_id,
+				"reason": battle.result.reason,
+				"captured": battle.result.winner_faction_id == battle.attacker_faction_id and battle.result.reason in [&"hq_capture", &"annihilation"],
+			})
+	else:
+		push_error("Failed to create battle runtime: %s" % created.errors)
 
-func _resolve_combat(region: Region, attacker_id: StringName, defender_id: StringName) -> void:
-	var attacker_stack: UnitStack = region.stacks.get(attacker_id)
-	var defender_stack: UnitStack = region.stacks.get(defender_id)
-	var attacker_before: int = attacker_stack.total_count()
-	var defender_before: int = defender_stack.total_count() if defender_stack else 0
-	# Snapshot composition before losses are applied, so the vignette can
-	# show which unit types were actually involved (apply_losses may zero
-	# out and erase entries from stack.units).
-	var attacker_units_before: Dictionary = attacker_stack.units.duplicate()
-	var defender_units_before: Dictionary = defender_stack.units.duplicate() if defender_stack else {}
-
-	var result := CombatResolver.resolve(attacker_stack, defender_stack, region)
-	attacker_stack.apply_losses(result.attacker_losses)
-	if defender_stack:
-		defender_stack.apply_losses(result.defender_losses)
-	if result.region_captured:
-		GameState.set_region_owner(region.def.id, attacker_id)
-
-	last_combat_log.append({
-		"region_id": region.def.id,
-		"type": "battle",
-		"attacker_id": attacker_id,
-		"defender_id": defender_id,
-		"outcome": result.outcome,
-		"attacker_before": attacker_before,
-		"attacker_after": attacker_stack.total_count(),
-		"defender_before": defender_before,
-		"defender_after": defender_stack.total_count() if defender_stack else 0,
-		"attacker_units": attacker_units_before,
-		"defender_units": defender_units_before,
-		"captured": result.region_captured,
-	})
+func complete_battle_runtime(battle: BattleRuntimeState) -> PackedStringArray:
+	var errors := GameState.apply_battle_result(battle)
+	if errors.is_empty():
+		pending_battle_states.erase(battle)
+		battle_runtime_finished.emit(battle.battle_id)
+	return errors
 
 func _build_world_events_summary() -> String:
 	var lines: Array = []
@@ -231,20 +254,19 @@ func _build_world_events_summary() -> String:
 			lines.append("%s が %s を無血占領しました。" % [fdef.display_name, region_name])
 		elif entry["type"] == "battle":
 			if _involves_player(entry):
-				continue  # the player already saw this one via the vignette
+				continue  # the player already watched this battle resolve live
 			var attacker_fdef: FactionDef = GameState.faction_defs[entry["attacker_id"]]
 			var defender_fdef: FactionDef = GameState.faction_defs[entry["defender_id"]]
 			if entry["captured"]:
 				lines.append("%s が %s で %s を撃破し占領しました。" % [attacker_fdef.display_name, region_name, defender_fdef.display_name])
 			else:
-				lines.append("%s が %s で %s と交戦しましたが決着つかず。" % [attacker_fdef.display_name, region_name, defender_fdef.display_name])
+				lines.append("%s が %s で %s と交戦しました。" % [attacker_fdef.display_name, region_name, defender_fdef.display_name])
 	return "\n".join(lines)
 
-func _run_diplomacy_phase() -> void:
-	Diplomacy.apply_combat_events(last_combat_log)
+func _run_diplomacy_week_end() -> void:
 	Diplomacy.tick_drift()
 
-func _run_victory_check() -> bool:
+func _run_victory_check(check_turn_cap: bool = false) -> bool:
 	var player_faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	if player_faction and player_faction.eliminated:
 		_end_game("player_eliminated", [])
@@ -263,7 +285,7 @@ func _run_victory_check() -> bool:
 		if pct >= GameState.campaign_config.victory_region_threshold_pct:
 			_end_game("region_threshold", [{"faction_id": fid, "score": -1}])
 			return true
-	if GameState.turn_number >= GameState.campaign_config.turn_cap:
+	if check_turn_cap and GameState.turn_number >= GameState.campaign_config.turn_cap:
 		_end_game("turn_cap", _score_standings(alive))
 		return true
 	return false

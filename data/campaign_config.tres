@@ -6,3 +6,4 @@
 script = ExtResource("1")
 turn_cap = 18
 victory_region_threshold_pct = 0.875
+faction_turn_order = Array[StringName]([&"nova_republic", &"crimson_empire"])

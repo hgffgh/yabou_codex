@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[node name="StandardBattleMap" type="Node3D"]
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+
