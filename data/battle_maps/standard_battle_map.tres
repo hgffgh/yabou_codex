@@ -13,4 +13,5 @@ defender_spawn_transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 400, 0, 0)
 attacker_hq_id = &"standard_attacker_hq"
 defender_hq_id = &"standard_defender_hq"
 control_point_ids = Array[StringName]([&"standard_relay"])
+terrain_zone_ids = Array[StringName]([&"standard_cover_ridge", &"standard_difficult_marsh", &"standard_hazard_field", &"standard_impassable_wreckage"])
 

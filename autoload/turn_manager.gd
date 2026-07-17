@@ -415,6 +415,7 @@ func _battle_involves_player(battle: BattleRuntimeState) -> bool:
 ## sites (e.g. the firing-disclosure reveal window) read it mid-battle.
 func _auto_resolve_battle(battle: BattleRuntimeState) -> void:
 	const AUTO_RESOLVE_STEP_SEC := 1.0
+	battle.is_auto_resolving = true
 	var max_iterations := int(ceil(BattleRuntimeState.MAX_WORLD_SEC / AUTO_RESOLVE_STEP_SEC)) + 5
 	var iterations := 0
 	while battle.result == null and iterations < max_iterations:

@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/terrain_zone_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"standard_difficult_marsh"
+effect = 1
+position = Vector3(150, 0, -120)
+radius_m = 100.0
+move_multiplier = 0.8

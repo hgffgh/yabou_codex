@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/terrain_zone_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"standard_hazard_field"
+effect = 3
+position = Vector3(0, 0, 200)
+radius_m = 80.0
+hazard_hp_pct_per_sec = 0.01

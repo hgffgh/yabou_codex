@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/terrain_zone_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"standard_impassable_wreckage"
+effect = 4
+position = Vector3(0, 0, -250)
+radius_m = 60.0
+blocks_sensor_los = true

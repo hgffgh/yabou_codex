@@ -249,7 +249,8 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 		var reaction_bonus := (float(target.reaction) - 100.0) * 0.2
 		var attack_command := (float(_active_leader_command(battle, attacker_squad)) - 100.0) * 0.1
 		var defense_command := (float(_active_leader_command(battle, target_squad)) - 100.0) * 0.1
-		var accuracy := clampi(roundi(float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command - (10.0 if target.defending else 0.0) + pilot_skill_modifier(battle, attacker, &"accuracy") - pilot_skill_modifier(battle, target, &"evasion")), 5, 95)
+		var cover_evasion := _cover_evasion_bonus(battle, target_squad, weapon)
+		var accuracy := clampi(roundi(float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command - (10.0 if target.defending else 0.0) - float(cover_evasion) + pilot_skill_modifier(battle, attacker, &"accuracy") - pilot_skill_modifier(battle, target, &"evasion")), 5, 95)
 		var hit := roll(battle, 100) < accuracy
 		var damage := 0
 		var critical := false
@@ -268,6 +269,17 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 			total += damage
 		battle.combat_events.append({"type": &"shot", "source_unit_id": attacker.unit_instance_id, "target_unit_id": target.unit_instance_id, "weapon_id": weapon.id, "hit": hit, "critical": critical, "damage": damage})
 	return total
+
+## COMBAT_DETAIL_SPECIFICATION.md section 29.2: cover adds to the
+## defender's evasion bonus against non-melee attacks only ("格闘属性攻撃は
+## 遮蔽効果を無視する"); folded into the accuracy formula as a subtracted
+## bonus, matching how target_def.evasion already works there.
+static func _cover_evasion_bonus(battle: BattleRuntimeState, target_squad: BattleSquadState, weapon: WeaponDef) -> int:
+	if weapon.damage_attribute == GameEnums.DamageAttribute.MELEE:
+		return 0
+	var zone := battle.terrain_zone_at(target_squad.world_position)
+	return zone.evasion_add if zone != null and zone.effect == GameEnums.TerrainEffect.COVER else 0
+
 
 static func _active_leader_command(battle: BattleRuntimeState, squad: BattleSquadState) -> int:
 	if squad.leader_unit_id.is_empty(): return squad.leader_command

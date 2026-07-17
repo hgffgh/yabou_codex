@@ -430,17 +430,49 @@ Every `Diplomacy` function takes `game_state` as an explicit first
 parameter instead of reading the `GameState` autoload by its bare
 identifier — see the "Validation and setup" section's note on the headless
 compile-order bug below, since a test exercising `Diplomacy` directly would
-otherwise be the exact trigger case. The remaining gaps, in rough order of
-value:
+otherwise be the exact trigger case.
 
-1. Terrain zones, navmesh pathfinding, and the in-round abstract
-   engagement-distance mechanic: see the battle squad movement/AI
-   milestone above for exactly what's still missing and why each piece
-   was deferred (no resource class/scene geometry, needs editor-baked
-   navigation, or is a distinct mechanic from pre-contact positioning).
-2. The event system (`EventDef`, main/sub events, dialogue UI, and a
+Terrain zones (COMBAT_DETAIL_SPECIFICATION.md section 29) are implemented:
+a new `TerrainZoneDef` (`res://data/terrain_zones/`) models a zone as a
+plain circle — `position` (real ground-plane x/z) plus `radius_m` — rather
+than the spec's `area_node_path`-driven `Area3D` shape, since there is no
+battle-map scene geometry to attach a real `Area3D` to and
+`BattleControlPointDef` already proves plain distance checks are how "a
+region of the battlefield" works in this codebase (capture/sensor radius,
+no physics queries). `standard_battle_map.tres` now references four zones
+(`standard_cover_ridge`, `standard_difficult_marsh`, `standard_hazard_field`,
+`standard_impassable_wreckage`) exercising all four effects: difficult
+terrain's 0.8x move-speed multiplier (`BattleRuntimeState._squad_speed`,
+which while in there also finally wired up
+`GameConstants.APTITUDE_MOVE_MULTIPLIERS` — declared from the start but
+never read by anything before now), cover's +15 evasion bonus against
+non-melee attacks (`BattleCombatSystem._cover_evasion_bonus`), hazardous
+terrain's 1%-max-HP-per-second drain floored at 1 HP that skips both pause
+and auto-resolved battles (`BattleRuntimeState._advance_terrain_hazard` /
+`is_auto_resolving`), and impassable zones rejecting a destination order
+placed inside one (`BattleRuntimeState.is_position_passable`, checked in
+`BattlePrototypeView._on_arena_input`). `blocks_sensor_los` (DATA_DEFINITION.md
+19.2) also blocks sensor detection along a line of sight that crosses such
+a zone, via a segment-vs-circle test in `_advance_intel_sensing`. Zones get
+a flat, unlit disc marker in the interactive battle view. Explicitly *not*
+implemented: true `NavigationRegion3D`/`NavigationServer3D` pathfinding —
+this battle simulation is a plain `RefCounted` advancing `Vector3`
+positions directly with no scene tree or physics server involved at all
+(deliberately, since auto-resolved battles run to completion with no
+`Node3D` ever instantiated), so real engine navmesh pathfinding isn't just
+hard to author through text tools, it's architecturally the wrong tool
+here; a squad may still cross through an impassable zone while in transit
+toward a valid destination, since only the destination itself is validated,
+not the path to it. The remaining gaps, in rough order of value:
+
+1. The event system (`EventDef`, main/sub events, dialogue UI, and a
    condition evaluator) remains schema-only — it was explicitly scoped out
    of the diplomacy milestone above as its own, much larger undertaking.
+2. COMBAT_DETAIL_SPECIFICATION.md section 26's in-round abstract
+   approach/withdrawal-distance mechanic (decoupled from `world_position`,
+   can shift which weapons stay in range mid-round) remains unimplemented
+   — a distinct, intricate mechanic from the pre-contact positioning and
+   terrain zones above, deserving its own pass.
 3. Tech gifting (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) was
    scoped out of the diplomacy milestone above: it needs a
    research-candidate/tech-node system that doesn't exist yet (the current
@@ -460,6 +492,11 @@ value:
 6. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
    is declared but nothing reads it, and the save schema's `difficulty_id`
    is correspondingly omitted from the save/load milestone above).
+7. Environment-aptitude accuracy/evasion bonuses (`GameConstants.
+   APTITUDE_ACCURACY_ADDITIONS`/`APTITUDE_EVASION_ADDITIONS`) remain
+   unwired, same as the move-speed multiplier was before this milestone —
+   out of scope here since the terrain spec only called for the speed
+   term.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -721,6 +758,21 @@ at `res://data/units/` is now the only unit-definition path.
   `_test_relation_state_round_trip` for `relation_states`/`diplomacy_log`
   surviving a JSON save/load round trip and `get_relation_state` resolving
   the same instance regardless of argument order.
+- Run `res://tests/terrain_zone_test.gd` for `terrain_zone_at` lookup,
+  difficult terrain's 0.8x speed multiplier, the newly-wired environment-
+  aptitude speed multiplier, cover's evasion bonus ignoring melee attacks,
+  hazard drain (floored at 1 HP, never destroying/finalizing the battle by
+  itself, stopped by `is_auto_resolving` and by pause), impassable-position
+  rejection, and sensor line-of-sight blocking by an obstacle directly on
+  the line between two squads (versus the same distance with a clear line
+  of sight). Uses the real `standard_battle_map.tres` zones rather than
+  synthetic fixtures, so master-data loading/validation is covered too.
+  When repositioning a squad and calling `advance_time` in a test, remember
+  to also pin the *other* squad (`movement_ai_disabled = true` plus a
+  matching `destination`) — otherwise a single large `advance_time` call
+  lets an AI-controlled squad close an unrealistic distance and start a
+  real fight in one step, as this test's hazard cases discovered the hard
+  way (`_pin_defender_far_away`).
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

@@ -51,7 +51,17 @@ func create_from_pending(
 	_build_side(state, state.defender_squad_ids, campaign, defender_spawn, false)
 	if battle_map != null:
 		_build_control_points(state, battle_map)
+		_build_terrain_zones(state, battle_map)
 	return {"state": state, "errors": errors}
+
+func _build_terrain_zones(state: BattleRuntimeState, battle_map: BattleMapDef) -> void:
+	var game_state: Node = Engine.get_main_loop().root.get_node_or_null("GameState")
+	if game_state == null:
+		return
+	for zone_id: StringName in battle_map.terrain_zone_ids:
+		var zone_def := game_state.master_data.terrain_zones.get(zone_id) as TerrainZoneDef
+		if zone_def != null:
+			state.terrain_zone_defs[zone_id] = zone_def
 
 func _build_control_points(state: BattleRuntimeState, battle_map: BattleMapDef) -> void:
 	var point_ids: Array[StringName] = [battle_map.attacker_hq_id, battle_map.defender_hq_id]

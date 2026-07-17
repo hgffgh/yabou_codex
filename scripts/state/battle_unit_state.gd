@@ -20,6 +20,7 @@ var command: int = 100
 var pilot_level: int = 1
 var hp_recovery_fraction: float = 0.0
 var en_recovery_fraction: float = 0.0
+var terrain_hazard_hp_fraction: float = 0.0
 var action_gauge: float = 0.0
 var post_action_delay_sec: float = 0.0
 var defending: bool = false

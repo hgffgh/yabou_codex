@@ -172,6 +172,8 @@ func _build_3d_world() -> void:
 		if point_id == battle.attacker_hq_id: color = Color(0.15, 0.55, 1.0); label_text = "ATTACKER HQ"
 		elif point_id == battle.defender_hq_id: color = Color(1.0, 0.2, 0.25); label_text = "DEFENDER HQ"
 		_add_control_point(point_id, point_def.position + Vector3(0, 3, 0), color, label_text)
+	for zone_id: StringName in battle.terrain_zone_defs:
+		_add_terrain_zone(battle.terrain_zone_defs[zone_id] as TerrainZoneDef)
 	camera = Camera3D.new()
 	camera.position = Vector3(0, 760, 720)
 	camera.fov = 52.0
@@ -225,6 +227,37 @@ func _add_control_point(point_id: StringName, position: Vector3, color: Color, l
 	label.modulate = color
 	world_root.add_child(label)
 	control_point_labels[point_id] = label
+
+## COMBAT_DETAIL_SPECIFICATION.md section 29: a flat, unlit disc sized to
+## radius_m, colored per effect, purely visual (no collision/interaction --
+## the actual gameplay effects live entirely in BattleRuntimeState/
+## BattleCombatSystem).
+const TERRAIN_ZONE_COLORS := {
+	GameEnums.TerrainEffect.DIFFICULT: Color(0.55, 0.42, 0.18),
+	GameEnums.TerrainEffect.COVER: Color(0.25, 0.65, 0.3),
+	GameEnums.TerrainEffect.HAZARDOUS: Color(0.85, 0.25, 0.1),
+	GameEnums.TerrainEffect.IMPASSABLE: Color(0.3, 0.3, 0.34),
+}
+
+func _add_terrain_zone(zone: TerrainZoneDef) -> void:
+	if zone == null or not TERRAIN_ZONE_COLORS.has(zone.effect):
+		return
+	var color: Color = TERRAIN_ZONE_COLORS[zone.effect]
+	var marker := MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = zone.radius_m
+	disc.bottom_radius = zone.radius_m
+	disc.height = 0.6
+	marker.mesh = disc
+	marker.position = zone.position + Vector3(0, 0.3, 0)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(color, 0.35)
+	material.emission_enabled = true
+	material.emission = color * 0.3
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	marker.material_override = material
+	world_root.add_child(marker)
 
 func _build_squad_visuals() -> void:
 	for squad: BattleSquadState in battle.squad_states_by_id.values():
@@ -480,8 +513,10 @@ func _on_arena_input(event: InputEvent) -> void:
 			(selection_markers[squad_id] as MeshInstance3D).visible = squad_id == selected_squad_id
 	elif event.button_index == MOUSE_BUTTON_RIGHT and not selected_squad_id.is_empty():
 		var squad := battle.squad_states_by_id.get(selected_squad_id) as BattleSquadState
-		if squad != null and battle.engagements_by_squad_id.is_empty() and squad.reengage_wait_sec <= 0.0 and not squad.retreat_requested:
-			squad.destination = Vector3(target.x, target.z, 0.0)
+		var destination := Vector3(target.x, target.z, 0.0)
+		if squad != null and battle.engagements_by_squad_id.is_empty() and squad.reengage_wait_sec <= 0.0 \
+				and not squad.retreat_requested and battle.is_position_passable(destination):
+			squad.destination = destination
 
 func _ray_to_ground(screen_position: Vector2) -> Variant:
 	var origin := camera.project_ray_origin(screen_position)

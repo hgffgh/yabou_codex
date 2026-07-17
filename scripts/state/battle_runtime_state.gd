@@ -25,6 +25,14 @@ var weapon_defs: Dictionary = {}
 var pilot_defs: Dictionary = {}
 var pilot_skill_defs: Dictionary = {}
 var support_skill_defs: Dictionary = {}
+var terrain_zone_defs: Dictionary = {}
+## Set by TurnManager._auto_resolve_battle for a battle with no view driving
+## it. COMBAT_DETAIL_SPECIFICATION.md section 29.3: hazardous-terrain HP
+## drain stops during auto-resolve (as well as while paused, which
+## advance_time's own time_scale <= 0.0 guard already covers) -- there is no
+## player watching to feel the pressure, so it would just be simulation cost
+## with no gameplay effect.
+var is_auto_resolving: bool = false
 ## From BattleMapDef.environment; used by PilotSkillDef's "environment"
 ## condition_type. Defaults to the BattleMapDef field's own default so a
 ## battle built without a battle_map still resolves to something valid.
@@ -56,6 +64,8 @@ func advance_time(delta_sec: float) -> void:
 	elapsed_world_sec = minf(MAX_WORLD_SEC, elapsed_world_sec + applied)
 	_advance_ai_squad_orders()
 	_advance_squad_movement(applied)
+	if not is_auto_resolving:
+		_advance_terrain_hazard(applied)
 	for squad: BattleSquadState in squad_states_by_id.values():
 		if squad.retreat_requested:
 			squad.retreat_prepare_sec = minf(RETREAT_PREPARE_SEC, squad.retreat_prepare_sec + applied)
@@ -79,7 +89,11 @@ func advance_time(delta_sec: float) -> void:
 		finalize(defender_faction_id, attacker_faction_id, &"timeout")
 
 ## UNIT_DETAIL/COMBAT_DETAIL_SPECIFICATION.md section 25: battlefield move
-## speed is unit speed / 10 m/s, using the slowest surviving unit.
+## speed is unit speed / 10 m/s, using the slowest surviving unit, scaled by
+## that unit's environment-aptitude move multiplier (previously unwired
+## anywhere despite GameConstants.APTITUDE_MOVE_MULTIPLIERS existing for
+## exactly this) and then by section 29.1's difficult-terrain multiplier at
+## the squad's own current position ("環境適性適用後の...速度を0.8倍する").
 func _squad_speed(squad: BattleSquadState) -> float:
 	var slowest := INF
 	for unit_id: StringName in squad.unit_instance_ids:
@@ -88,8 +102,82 @@ func _squad_speed(squad: BattleSquadState) -> float:
 			continue
 		var unit_def := unit_defs.get(unit.unit_def_id) as UnitDef
 		if unit_def != null:
-			slowest = minf(slowest, float(unit_def.speed) / 10.0)
-	return slowest if slowest < INF else 0.0
+			var aptitude: GameEnums.EnvironmentAptitude = _environment_aptitude(unit_def)
+			var aptitude_multiplier: float = GameConstants.APTITUDE_MOVE_MULTIPLIERS[aptitude]
+			slowest = minf(slowest, float(unit_def.speed) / 10.0 * aptitude_multiplier)
+	if slowest == INF:
+		return 0.0
+	var zone := terrain_zone_at(squad.world_position)
+	return slowest * zone.move_multiplier if zone != null else slowest
+
+
+func _environment_aptitude(unit_def: UnitDef) -> GameEnums.EnvironmentAptitude:
+	match environment:
+		GameEnums.EnvironmentType.GROUND: return unit_def.ground_aptitude
+		GameEnums.EnvironmentType.MOON: return unit_def.moon_aptitude
+		_: return unit_def.space_aptitude
+
+
+## COMBAT_DETAIL_SPECIFICATION.md section 29: zones are simple circles (see
+## TerrainZoneDef's doc comment for why), so "the terrain under a position"
+## is just the first zone (by sorted id, for determinism) whose radius
+## contains it. Overlapping zones aren't a supported map-authoring pattern;
+## whichever sorts first wins if map data ever does overlap them. `position`
+## uses BattleSquadState.world_position's (x, y-as-world-Z) convention.
+func terrain_zone_at(position: Vector3) -> TerrainZoneDef:
+	var flat := Vector2(position.x, position.y)
+	var zone_ids: Array = terrain_zone_defs.keys()
+	zone_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for zone_id: Variant in zone_ids:
+		var zone := terrain_zone_defs[zone_id] as TerrainZoneDef
+		if zone == null:
+			continue
+		var center := Vector2(zone.position.x, zone.position.z)
+		if flat.distance_to(center) <= zone.radius_m:
+			return zone
+	return null
+
+
+## COMBAT_DETAIL_SPECIFICATION.md section 29.4: "部隊は通過・停止できず、
+## 経路探索時に迂回する" (squads can't pass through or stop in an impassable
+## zone; pathfinding routes around it). This game's battle simulation is a
+## plain RefCounted advancing Vector3 positions directly with no scene tree
+## or physics server involved -- deliberately so, since auto-resolved
+## battles run to completion with no Node3D/NavigationRegion3D ever
+## instantiated -- so real NavigationServer3D pathfinding isn't just hard to
+## author through text tools, it's the wrong tool for this architecture.
+## What's implemented instead: a destination can't be set inside an
+## impassable zone (see BattlePrototypeView._on_arena_input). Detouring
+## around a zone that happens to lie directly between a squad's current
+## position and an otherwise-valid destination is not implemented; a squad
+## may still cross through one in transit.
+func is_position_passable(position: Vector3) -> bool:
+	var zone := terrain_zone_at(position)
+	return zone == null or zone.effect != GameEnums.TerrainEffect.IMPASSABLE
+
+
+## COMBAT_DETAIL_SPECIFICATION.md section 29.3: hazardous terrain drains 1%
+## of a unit's max HP per second, floored at 1 HP, ignoring armor/attribute/
+## defense/evasion entirely, and never destroying, injuring, or awarding EXP
+## by itself (all satisfied here simply by never letting current_hp reach 0
+## from this source). Uses the same fractional-accumulator pattern as
+## control-point HP/EN recovery so sub-1-HP-per-tick drain still adds up
+## correctly over many small time steps.
+func _advance_terrain_hazard(applied_sec: float) -> void:
+	for squad: BattleSquadState in squad_states_by_id.values():
+		var zone := terrain_zone_at(squad.world_position)
+		if zone == null or zone.hazard_hp_pct_per_sec <= 0.0:
+			continue
+		for unit_id: StringName in squad.unit_instance_ids:
+			var unit := unit_states_by_id[unit_id] as BattleUnitState
+			if unit.current_hp <= 1:
+				continue
+			unit.terrain_hazard_hp_fraction += float(unit.max_hp) * zone.hazard_hp_pct_per_sec * applied_sec
+			var hp_loss := floori(unit.terrain_hazard_hp_fraction)
+			if hp_loss <= 0:
+				continue
+			unit.terrain_hazard_hp_fraction -= hp_loss
+			unit.current_hp = maxi(1, unit.current_hp - hp_loss)
 
 ## Moved here from BattlePrototypeView so destination-seeking movement also
 ## runs for auto-resolved battles that have no view driving _process every
@@ -291,7 +379,7 @@ func _advance_intel_sensing() -> void:
 			if opponent.faction_id == squad.faction_id or not _squad_has_living_units(opponent):
 				continue
 			var distance := Vector2(opponent.world_position.x, opponent.world_position.y).distance_to(Vector2(squad.world_position.x, squad.world_position.y))
-			if distance <= opponent.sensor_range_m:
+			if distance <= opponent.sensor_range_m and not _sensor_los_blocked(opponent.world_position, squad.world_position):
 				in_sensor_range = true
 				break
 		# currently_sensed governs only whether the *live* position is
@@ -304,6 +392,23 @@ func _advance_intel_sensing() -> void:
 			squad.intel_confirmed = true
 		if squad.currently_sensed:
 			squad.last_known_world_position = squad.world_position
+
+## DATA_DEFINITION.md section 19.2's blocks_sensor_los: a large-obstacle
+## zone between two squads blocks sensor detection even within range,
+## approximated as a segment-vs-circle intersection between the two
+## squads' flattened (x, y-as-world-Z) positions and the zone's footprint.
+func _sensor_los_blocked(a: Vector3, b: Vector3) -> bool:
+	var from2 := Vector2(a.x, a.y)
+	var to2 := Vector2(b.x, b.y)
+	for zone: TerrainZoneDef in terrain_zone_defs.values():
+		if zone == null or not zone.blocks_sensor_los:
+			continue
+		var center := Vector2(zone.position.x, zone.position.z)
+		var closest: Vector2 = Geometry2D.get_closest_point_to_segment(center, from2, to2)
+		if closest.distance_to(center) <= zone.radius_m:
+			return true
+	return false
+
 
 func _squad_max_sensor_range(squad: BattleSquadState) -> float:
 	var result := 0.0

@@ -19,7 +19,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	for category: StringName in [
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
-		&"battle_maps", &"battle_control_points",
+		&"battle_maps", &"battle_control_points", &"terrain_zones",
 	]:
 		_validate_ids(category, registry.get_category(category))
 	_validate_global_id_uniqueness(registry)
@@ -31,6 +31,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	_validate_facility_defs(registry)
 	_validate_facility_instances(registry)
 	_validate_battle_control_points(registry)
+	_validate_terrain_zones(registry)
 	_validate_battle_maps(registry)
 	_errors.sort()
 	return _errors.duplicate()
@@ -41,7 +42,7 @@ func _validate_global_id_uniqueness(registry: MasterDataRegistry) -> void:
 	for category: StringName in [
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
-		&"battle_maps", &"battle_control_points",
+		&"battle_maps", &"battle_control_points", &"terrain_zones",
 	]:
 		for id_value: Variant in registry.get_category(category):
 			var id := StringName(id_value)
@@ -224,6 +225,15 @@ func _validate_battle_control_points(registry: MasterDataRegistry) -> void:
 		_range_float(item, &"hp_recovery_pct_per_sec", 0.0, 1.0, &"battle_control_points", id)
 		_range_float(item, &"en_recovery_pct_per_sec", 0.0, 1.0, &"battle_control_points", id)
 
+func _validate_terrain_zones(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.terrain_zones):
+		var item: Resource = registry.terrain_zones[id]
+		_range_int(item, &"effect", 0, 4, &"terrain_zones", id)
+		_min_float(item, &"radius_m", 0.000001, &"terrain_zones", id)
+		_range_float(item, &"move_multiplier", 0.0, 2.0, &"terrain_zones", id)
+		_range_int(item, &"evasion_add", 0, 100, &"terrain_zones", id)
+		_range_float(item, &"hazard_hp_pct_per_sec", 0.0, 1.0, &"terrain_zones", id)
+
 func _validate_battle_maps(registry: MasterDataRegistry) -> void:
 	for id: StringName in _sorted_ids(registry.battle_maps):
 		var item: Resource = registry.battle_maps[id]
@@ -234,6 +244,7 @@ func _validate_battle_maps(registry: MasterDataRegistry) -> void:
 		_reference(item, &"attacker_hq_id", &"battle_control_points", registry.battle_control_points, &"battle_maps", id)
 		_reference(item, &"defender_hq_id", &"battle_control_points", registry.battle_control_points, &"battle_maps", id)
 		_references(item, &"control_point_ids", &"battle_control_points", registry.battle_control_points, &"battle_maps", id)
+		_references(item, &"terrain_zone_ids", &"terrain_zones", registry.terrain_zones, &"battle_maps", id)
 		if item.get("attacker_hq_id") == item.get("defender_hq_id"): _error(&"battle_maps", id, "headquarters IDs must differ")
 		if NodePath(item.get("navigation_region_path")).is_empty(): _error(&"battle_maps", id, "navigation_region_path must not be empty")
 

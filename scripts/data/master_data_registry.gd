@@ -15,6 +15,7 @@ const SOURCES: Array[Dictionary] = [
 	{"key": &"facility_instances", "path": "res://data/facilities/", "class": &"FacilityInstanceDef"},
 	{"key": &"battle_maps", "path": "res://data/battle_maps/", "class": &"BattleMapDef"},
 	{"key": &"battle_control_points", "path": "res://data/battle_control_points/", "class": &"BattleControlPointDef"},
+	{"key": &"terrain_zones", "path": "res://data/terrain_zones/", "class": &"TerrainZoneDef"},
 ]
 
 var units: Dictionary = {}
@@ -28,6 +29,7 @@ var facility_defs: Dictionary = {}
 var facility_instances: Dictionary = {}
 var battle_maps: Dictionary = {}
 var battle_control_points: Dictionary = {}
+var terrain_zones: Dictionary = {}
 
 var load_errors: PackedStringArray = []
 var source_paths: Dictionary = {} # "category:id" -> resource path
