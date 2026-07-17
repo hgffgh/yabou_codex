@@ -1,0 +1,24 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"nova_sub_001_border_skirmish"
+faction_id = &"nova_republic"
+importance = 1
+priority = 0
+title_key = &"event.nova_sub_001_border_skirmish.title"
+condition_tree = {
+"type": "region_count_at_least",
+"count": 2
+}
+once_per_profile = false
+once_per_campaign = true
+dialogue_entries = Array[Dictionary]([{
+"speaker_key": &"event.speaker.commander",
+"body_key": &"event.nova_sub_001_border_skirmish.dialogue1"
+}])
+choice_entries = Array[Dictionary]([])
+default_effect_ids = Array[StringName]([&"funds_boost_small"])
+followup_event_ids = Array[StringName]([])

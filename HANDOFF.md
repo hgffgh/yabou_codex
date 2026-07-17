@@ -660,11 +660,110 @@ as a single cutover across data/state/UI/AI rather than staged):
   `mandatory_base_tech` entries (`nova_hull_foundation`/
   `crimson_hull_foundation`).
 
-The remaining gap, in rough order of value:
+The event system (EVENT_DETAIL_SPECIFICATION.md / DATA_DEFINITION.md section
+22) is complete, closing the last item on this document's own gap list — see
+the "Validation and setup" section's note on scope for what's deliberately
+still missing (art assets, VN-style playback controls, the recap screen):
 
-1. The event system (`EventDef`, main/sub events, dialogue UI, and a
-   condition evaluator) remains schema-only — it was explicitly scoped out
-   of the diplomacy milestone above as its own, much larger undertaking.
+- `EventDef` matches section 22's schema. `condition_tree` is a Dictionary,
+  not code (`{"all"/"any"/"not": ...}` composing `{"type": "<condition_type>",
+  ...}` leaves), evaluated by `EventConditionEvaluator.evaluate` — DATA_
+  DEFINITION.md explicitly leaves this data format undecided, so the exact
+  leaf-type set is a scope decision made here. All ten of section 3's trigger
+  categories are covered by at least one concrete, state-backed condition
+  type (`turn_at_least`/`turn_at_most`, `region_owned`/`region_not_owned`,
+  `squad_near_region` — a BFS hop count over `RegionDef.neighbor_ids` from
+  every region a faction has a squad in, `tech_researched`, `pilot_assigned`/
+  `pilots_share_squad`, `pilot_injured`, `relation_band_at_least`/
+  `treaty_active`, `capture_count_at_least`, `region_count_at_least`/
+  `military_power_at_least` via the existing `BattlePowerEstimator`, and
+  `event_flag_set`/`event_choice_selected`). Two categories are narrower than
+  their spec prose: "固有パイロットの撃破" (pilot death) collapses into
+  `pilot_injured` since this ruleset has no permanent pilot death — a
+  destroyed unit's pilot is always just injured (STRATEGY_DETAIL_SPECIFICATION.md
+  section 5.7) — and "解析" (encyclopedia analysis) isn't modeled since no
+  encyclopedia system exists, so only the capture-count half of that category
+  is covered.
+- A parallel `EventEffectDef` (id + `GameEnums.EventEffectType` + payload
+  Dictionary) plays the same role for "効果ID" that choice_entries/
+  default_effect_ids reference — DATA_DEFINITION.md names the effect *type*
+  enum but not a distinct resource for authoring one as data, so this adds
+  the missing piece the same way `AchievementDef.condition_type`/
+  `condition_payload` already does for achievements. `EventEffectApplier.
+  apply(game_state, faction_id, effect)` implements all 13 `EventEffectType`
+  values against real state: FUNDS/MATERIALS (floored at 0), TECH_CANDIDATE
+  (grants a `gifted = true` research node, reusing the same dedup-by-tech_id
+  and any-prior-tier-researched prerequisite rule `Diplomacy.gift_tech`
+  established), RESEARCH_MODIFIER (adjusts `current_research.turns_remaining`,
+  min 1), PILOT_JOIN/PILOT_LEAVE (the latter also finally reads
+  `PilotState.available`, wiring up a field that had been set since the
+  achievements milestone but never checked anywhere — `assign_pilot_to_unit`
+  now rejects an unavailable pilot the same way it already rejected an
+  injured one), PILOT_INJURE, UNIT_GAIN/UNIT_LOSE, RELATION, TREATY (directly
+  sets a relation pair's treaty state, bypassing the normal proposal/roll
+  flow — an event can just narratively grant or break one), and
+  ENEMY_REINFORCEMENT (UNIT_GAIN targeting a different faction_id than the
+  event's own).
+- `Faction` gained `event_flags` (read by `event_flag_set`/written by the
+  EVENT_FLAG effect and by choice resolution itself — see below),
+  `pending_event_ids`, and `triggered_event_ids` (once_per_campaign/
+  exclusive_group_id gating, locked in at *registration*, not resolution, so
+  the same condition can't re-register a still-unresolved pending event next
+  turn). `ProfileState` gained `viewed_event_ids` (once_per_profile gating
+  across campaigns, and section 6's "回想" recap list — MAIN events always
+  land here on resolution; a SUB event only does if it's explicitly
+  `once_per_profile`). `CampaignRuntimeState` gained `campaign_event_history`
+  (section 6's "履歴ログ": every resolved SUB event, this campaign only).
+- `GameState.check_pending_events(faction_id)` evaluates every `EventDef`
+  targeting that faction against `EventConditionEvaluator`, appending newly-
+  satisfied ones to `pending_event_ids` and sorting the whole queue by
+  importance (MAIN before SUB), then `priority`, then id — exactly section
+  8's "主要イベント、補助イベント、イベントID昇順で処理する" plus section
+  22's own `priority` field for same-type ordering.
+  `GameState.resolve_event_choice(faction_id, event_id, choice_id)` applies
+  the chosen effect_ids (or `default_effect_ids` for a choice-less event),
+  records `event_flags["choice:<event_id>"] = choice_id` (backing
+  `event_choice_selected`), and files the event into the recap list or
+  history log per its importance. `TurnManager._begin_faction_turn` calls
+  `check_pending_events` for every faction right before that faction's own
+  `Phase.ORDERS` (section 8: "次の該当勢力ターン開始処理後、戦略フェイズ
+  前に再生する"); an AI faction has no UI to show events to, so
+  `GameState.auto_resolve_pending_events` immediately resolves its whole
+  queue by deterministically picking each event's first `choice_entries`
+  option (or its `default_effect_ids`) — a simple stand-in for real AI
+  narrative decision-making, mirroring how every other `AiController`
+  decision is instant and not player-visible.
+- A new `EventPanel` (mirroring the other overlay panels' style) presents the
+  player faction's queue one event at a time: a "次へ" button advances
+  through `dialogue_entries`, then choice buttons appear (or a single
+  acknowledge button for a choice-less event) and resolving one immediately
+  loads the next queued event or closes. `StrategicMap._on_phase_changed`
+  opens it automatically whenever `Phase.ORDERS` begins for the player
+  faction with a non-empty `pending_event_ids` — the panel's own modal
+  overlay (dim background, `MOUSE_FILTER_STOP`, a layer above every other
+  panel) is what actually blocks the player from acting until every event
+  resolves, rather than `TurnManager` awaiting UI input mid-turn-advance.
+- Sample data: 8 events (`res://data/events/`, 2 MAIN + 2 SUB per faction)
+  and 11 effects (`res://data/event_effects/`) — scaled down from the spec's
+  "~8 main + ~15 sub per faction, ~69 total" the same way `TechTreeGenerator`
+  scaled its per-tier node count, given how much smaller the actually-authored
+  sample dataset is. One pair per faction demonstrates a MAIN event's binary
+  aggressive/diplomatic choice gating a SUB event via `event_choice_selected`
+  (`nova_main_001_first_contact` → `nova_sub_002_diplomacy_pays_off`, and the
+  Crimson mirror), so the condition/effect/registration loop is exercised
+  end-to-end by real data, not just synthetic test fixtures.
+- Explicitly out of scope, matching every other panel in this codebase
+  shipping plain-but-functional UI ahead of any final art: `scene_background`
+  and dialogue-entry portraits (no character art or background images exist
+  in this project yet), and section 7's VN-style playback controls (fast-
+  forward, auto-play, a conversation log, read-only skip-ahead) — `EventPanel`
+  is a plain sequential "次へ"-through-dialogue-then-choose flow with no skip
+  affordance at all, which trivially satisfies section 7's one hard
+  requirement ("選択肢到達時に早送り・スキップを停止する", never skipping
+  past an unread choice) by not implementing skip in the first place. The
+  回想 (recap) screen itself — a UI browsing `profile.viewed_event_ids` — also
+  isn't built; the data it would read (`ProfileState.viewed_event_ids`) is
+  in place and already covered by `event_system_test.gd`.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -1015,6 +1114,38 @@ at `res://data/units/` is now the only unit-definition path.
   back to the outer scope — use a single-slot `Array` as a mutable box
   instead when a signal-connected lambda needs to report a result back to
   its caller.
+- Run `res://tests/event_system_test.gd` for `EventConditionEvaluator`
+  (nested all/any/not composition, and every leaf condition type: turn,
+  region ownership, the `squad_near_region` BFS hop-cap, tech research,
+  pilot assignment/injury, relation band/treaty state, capture count, region
+  count, event flags, and past-choice results), `EventEffectApplier` (FUNDS
+  floored at 0, RELATION deltas, EVENT_FLAG, TECH_CANDIDATE dedup-by-tech_id,
+  and PILOT_LEAVE's new `PilotState.available` gate actually blocking
+  `assign_pilot_to_unit`), `GameState.check_pending_events` (MAIN-before-SUB/
+  priority/id sort order, re-checking not double-registering a still-pending
+  once_per_campaign event), `resolve_event_choice` (effect application,
+  `choice:<event_id>` flag recording, a resolved choice unlocking a
+  `event_choice_selected`-gated follow-up event in the real sample data,
+  MAIN events landing in `profile.viewed_event_ids`), `auto_resolve_pending_events`
+  deterministically picking an AI faction's first choice, a save/load round
+  trip of all the new per-faction/campaign/profile event fields, and — the
+  one integration-level case that doesn't call GameState's event functions
+  directly — a real `TurnManager.commit_turn()` cycle proving
+  `_begin_faction_turn` actually registers the player's events and
+  auto-resolves the AI faction's own. Same profile-file snapshot/restore
+  wrapper as `achievements_profile_test.gd`, for the same reason
+  (`resolve_event_choice` persists MAIN events to the real
+  `user://profile.json`). Authoring the sample `EventDef`/`EventEffectDef`
+  `.tres` data directly (not through the editor) needs nested typed-array
+  literal syntax the rest of this project's data hadn't exercised yet:
+  `Array[Dictionary]([{...}, {...}])`, with further `Array[StringName]([...])`
+  literals nested inside those dictionaries for effect_ids — confirmed
+  working, but easy to get an enum index wrong inside a payload Dictionary
+  (`EventEffectType.EVENT_FLAG` is index 12, not 11 — GDScript won't catch a
+  wrong plain `int` against an enum-typed export field the way it would
+  catch a wrong type entirely) and have the effect silently no-op instead of
+  erroring, since `EventEffectApplier.apply`'s `match` just falls through to
+  a different case with a payload shape that doesn't match either.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

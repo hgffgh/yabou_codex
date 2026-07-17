@@ -1,0 +1,35 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"nova_main_001_first_contact"
+faction_id = &"nova_republic"
+importance = 0
+priority = 0
+title_key = &"event.nova_main_001_first_contact.title"
+condition_tree = {
+"type": "turn_at_least",
+"turn": 1
+}
+once_per_profile = false
+once_per_campaign = true
+dialogue_entries = Array[Dictionary]([{
+"speaker_key": &"event.speaker.commander",
+"body_key": &"event.nova_main_001_first_contact.dialogue1"
+}, {
+"speaker_key": &"event.speaker.commander",
+"body_key": &"event.nova_main_001_first_contact.dialogue2"
+}])
+choice_entries = Array[Dictionary]([{
+"id": &"aggressive",
+"label_key": &"event.nova_main_001_first_contact.choice_aggressive",
+"effect_ids": Array[StringName]([&"relation_loss_toward_crimson", &"flag_chose_aggressive"])
+}, {
+"id": &"diplomatic",
+"label_key": &"event.nova_main_001_first_contact.choice_diplomatic",
+"effect_ids": Array[StringName]([&"relation_gain_toward_crimson", &"flag_chose_diplomatic"])
+}])
+default_effect_ids = Array[StringName]([])
+followup_event_ids = Array[StringName]([])

@@ -18,6 +18,8 @@ const SOURCES: Array[Dictionary] = [
 	{"key": &"terrain_zones", "path": "res://data/terrain_zones/", "class": &"TerrainZoneDef"},
 	{"key": &"difficulties", "path": "res://data/difficulties/", "class": &"DifficultyDef"},
 	{"key": &"achievements", "path": "res://data/achievements/", "class": &"AchievementDef"},
+	{"key": &"event_effects", "path": "res://data/event_effects/", "class": &"EventEffectDef"},
+	{"key": &"events", "path": "res://data/events/", "class": &"EventDef"},
 ]
 
 var units: Dictionary = {}
@@ -34,6 +36,8 @@ var battle_control_points: Dictionary = {}
 var terrain_zones: Dictionary = {}
 var difficulties: Dictionary = {}
 var achievements: Dictionary = {}
+var event_effects: Dictionary = {}
+var events: Dictionary = {}
 
 var load_errors: PackedStringArray = []
 var source_paths: Dictionary = {} # "category:id" -> resource path

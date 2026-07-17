@@ -13,6 +13,11 @@ var pilots_by_id: Dictionary = {}
 var intel_records_by_key: Dictionary = {}  # "observer_faction_id|target_squad_id" -> IntelRecordState
 var relation_states: Dictionary = {}  # sorted "faction_id|faction_id" -> RelationState
 var diplomacy_log: Array = []  # Array[Dictionary], DiplomacyLogEntry-shaped (DATA_DEFINITION.md 18.2)
+## DATA_DEFINITION.md section 26.1: every SUB event resolved this campaign
+## (MAIN events go to the cross-campaign ProfileState.viewed_event_ids
+## "recap" list instead -- EVENT_DETAIL_SPECIFICATION.md section 6:
+## "主要イベントは回想へ、補助イベントは履歴ログへ登録する").
+var campaign_event_history: Array[StringName] = []
 var production_jobs_by_id: Dictionary = {}
 var production_queues_by_facility_id: Dictionary = {}
 var next_unit_serial: int = 1
@@ -27,6 +32,7 @@ func reset() -> void:
 	intel_records_by_key.clear()
 	relation_states.clear()
 	diplomacy_log.clear()
+	campaign_event_history.clear()
 	production_jobs_by_id.clear()
 	production_queues_by_facility_id.clear()
 	next_unit_serial = 1
@@ -176,6 +182,8 @@ func assign_pilot_to_unit(pilot_id: StringName, unit_instance_id: StringName) ->
 		return errors
 	if pilot.is_injured():
 		errors.append("pilot assignment: pilot is injured")
+	if not pilot.available:
+		errors.append("pilot assignment: pilot is not available")
 	if unit.owner_faction_id != pilot.owner_faction_id:
 		errors.append("pilot assignment: unit is not owned by the pilot's faction")
 	elif unit.condition != GameEnums.UnitCondition.ACTIVE:
@@ -792,6 +800,7 @@ func to_dict() -> Dictionary:
 		"intel_records": intel_records,
 		"relation_states": relation_state_dicts,
 		"diplomacy_log": diplomacy_log.duplicate(true),
+		"campaign_event_history": campaign_event_history.duplicate(),
 		"production_jobs": production_jobs,
 		"production_queues": production_queues,
 	}
@@ -902,6 +911,13 @@ static func from_dict(data: Dictionary) -> Dictionary:
 			})
 	else:
 		errors.append("campaign.diplomacy_log must be an Array")
+
+	var event_history_values: Variant = data.get("campaign_event_history", [])
+	if event_history_values is Array:
+		for value: Variant in event_history_values as Array:
+			state.campaign_event_history.append(StringName(value))
+	else:
+		errors.append("campaign.campaign_event_history must be an Array")
 
 	var job_values: Variant = data.get("production_jobs", [])
 	if job_values is Array:

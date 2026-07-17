@@ -332,6 +332,14 @@ func _begin_faction_turn() -> void:
 	GameState.advance_repairs_for_faction(active_faction_id)
 	GameState.advance_pilot_injuries_for_faction(active_faction_id)
 	GameState.refresh_intel_from_colocation(active_faction_id)
+	## EVENT_DETAIL_SPECIFICATION.md section 8: "次の該当勢力ターン開始処理後、
+	## 戦略フェイズ前に再生する". The player faction's pending_event_ids is
+	## left populated for StrategicMap's EventPanel to present (blocking
+	## player input the same way every other modal panel does); an AI
+	## faction has no UI to show them to, so it auto-resolves immediately.
+	GameState.check_pending_events(active_faction_id)
+	if active_faction_id != GameState.player_faction_id:
+		GameState.auto_resolve_pending_events(active_faction_id)
 	_set_phase(Phase.ORDERS)
 
 ## Called by the StrategicMap UI's "End Turn" button.

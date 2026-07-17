@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_effect_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"flag_chose_aggressive"
+effect_type = 12
+payload = {
+"flag": &"chose_aggressive",
+"value": true
+}

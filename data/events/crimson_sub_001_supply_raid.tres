@@ -1,0 +1,24 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"crimson_sub_001_supply_raid"
+faction_id = &"crimson_empire"
+importance = 1
+priority = 0
+title_key = &"event.crimson_sub_001_supply_raid.title"
+condition_tree = {
+"type": "region_count_at_least",
+"count": 2
+}
+once_per_profile = false
+once_per_campaign = true
+dialogue_entries = Array[Dictionary]([{
+"speaker_key": &"event.speaker.emperor",
+"body_key": &"event.crimson_sub_001_supply_raid.dialogue1"
+}])
+choice_entries = Array[Dictionary]([])
+default_effect_ids = Array[StringName]([&"funds_boost_small"])
+followup_event_ids = Array[StringName]([])

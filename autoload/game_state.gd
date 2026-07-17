@@ -185,6 +185,127 @@ func _count_successful_player_treaties() -> int:
 			count += 1
 	return count
 
+## EVENT_DETAIL_SPECIFICATION.md section 8: "条件達成時にイベントを発生待ち
+## へ登録する". Called once per faction right before that faction's own
+## ORDERS phase (TurnManager._begin_faction_turn). once_per_campaign
+## (faction.triggered_event_ids) and exclusive_group_id are locked in at
+## registration time, not at playback/resolution -- this is also what keeps
+## the same condition from re-registering the event again next turn while
+## it's still sitting unresolved in pending_event_ids.
+func check_pending_events(faction_id: StringName) -> void:
+	var faction := get_faction(faction_id)
+	if faction == null:
+		return
+	var locked_groups: Dictionary = {}
+	for triggered_id: StringName in faction.triggered_event_ids:
+		var triggered_def := master_data.events.get(triggered_id) as EventDef
+		if triggered_def != null and not triggered_def.exclusive_group_id.is_empty():
+			locked_groups[triggered_def.exclusive_group_id] = true
+	var ids := master_data.events.keys()
+	ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for id: StringName in ids:
+		var def := master_data.events[id] as EventDef
+		if def == null or def.faction_id != faction_id:
+			continue
+		if faction.pending_event_ids.has(id):
+			continue
+		if def.once_per_campaign and faction.triggered_event_ids.has(id):
+			continue
+		if not def.exclusive_group_id.is_empty() and locked_groups.has(def.exclusive_group_id):
+			continue
+		if def.once_per_profile and profile.has_viewed_event(id):
+			continue
+		if not EventConditionEvaluator.evaluate(def.condition_tree, self, faction_id):
+			continue
+		faction.pending_event_ids.append(id)
+		if not faction.triggered_event_ids.has(id):
+			faction.triggered_event_ids.append(id)
+		if not def.exclusive_group_id.is_empty():
+			locked_groups[def.exclusive_group_id] = true
+	_sort_pending_events(faction)
+
+## EVENT_DETAIL_SPECIFICATION.md section 8: "主要イベント、補助イベント、
+## イベントID昇順で処理する" (importance, then, per section 22's `priority`
+## field, "同種内順序。最終tieはID").
+func _sort_pending_events(faction: Faction) -> void:
+	faction.pending_event_ids.sort_custom(func(a: StringName, b: StringName) -> bool:
+		var da := master_data.events[a] as EventDef
+		var db := master_data.events[b] as EventDef
+		if da.importance != db.importance:
+			return da.importance < db.importance
+		if da.priority != db.priority:
+			return da.priority < db.priority
+		return String(a) < String(b)
+	)
+
+## Applies choice_id's effect_ids (or default_effect_ids if the event has no
+## choices / choice_id is empty), then removes event_id from
+## pending_event_ids. EVENT_DETAIL_SPECIFICATION.md section 8: "選択効果は
+## 再生直後に反映し、そのターンから使用可能とする" -- effects apply
+## synchronously here, immediately usable within the same turn. Section 6:
+## MAIN events register to the cross-campaign recap list
+## (profile.viewed_event_ids), SUB events to this campaign's history log
+## (campaign_runtime.campaign_event_history); once_per_profile also adds a
+## SUB event to the recap list so its own gate has something to check next
+## campaign.
+func resolve_event_choice(faction_id: StringName, event_id: StringName, choice_id: StringName = &"") -> PackedStringArray:
+	var errors := PackedStringArray()
+	var faction := get_faction(faction_id)
+	var def := master_data.events.get(event_id) as EventDef
+	if faction == null or def == null:
+		errors.append("event: faction_id or event_id does not resolve")
+		return errors
+	if not faction.pending_event_ids.has(event_id):
+		errors.append("event: event_id is not pending for this faction")
+		return errors
+
+	var effect_ids: Array[StringName] = def.default_effect_ids
+	if not def.choice_entries.is_empty():
+		var chosen: Dictionary = {}
+		for choice: Dictionary in def.choice_entries:
+			if StringName(choice.get("id", "")) == choice_id:
+				chosen = choice
+				break
+		if chosen.is_empty():
+			errors.append("event: choice_id does not resolve to one of this event's choices")
+			return errors
+		effect_ids = []
+		for value: Variant in chosen.get("effect_ids", []) as Array:
+			effect_ids.append(StringName(value))
+		faction.event_flags[StringName("choice:%s" % event_id)] = String(choice_id)
+
+	for effect_id: StringName in effect_ids:
+		var effect_def := master_data.event_effects.get(effect_id) as EventEffectDef
+		if effect_def != null:
+			EventEffectApplier.apply(self, faction_id, effect_def)
+
+	faction.pending_event_ids.erase(event_id)
+	if def.importance == GameEnums.EventImportance.MAIN:
+		if profile.mark_event_viewed(event_id):
+			save_profile()
+	else:
+		campaign_runtime.campaign_event_history.append(event_id)
+		if def.once_per_profile and profile.mark_event_viewed(event_id):
+			save_profile()
+	return errors
+
+## No UI exists for a non-player faction's events, so each is resolved the
+## instant it's registered: the first choice_entries option deterministically
+## (or default_effect_ids if the event has none). This is a simple,
+## deterministic stand-in for real AI narrative decision-making, mirroring
+## how AiController's other decisions are instant and not player-visible.
+func auto_resolve_pending_events(faction_id: StringName) -> void:
+	var faction := get_faction(faction_id)
+	if faction == null:
+		return
+	while not faction.pending_event_ids.is_empty():
+		var event_id: StringName = faction.pending_event_ids[0]
+		var def := master_data.events.get(event_id) as EventDef
+		var choice_id := &""
+		if def != null and not def.choice_entries.is_empty():
+			choice_id = StringName((def.choice_entries[0] as Dictionary).get("id", ""))
+		resolve_event_choice(faction_id, event_id, choice_id)
+
 ## DATA_DEFINITION.md section 26: everything a manual save needs from
 ## GameState's side (TurnManager.to_save_dict covers the turn-order/phase
 ## half). difficulty_id and rng_state are intentionally omitted -- there is
@@ -210,6 +331,9 @@ func to_save_dict() -> Dictionary:
 			"generated_tech_nodes": node_states,
 			"current_research": faction.current_research.to_dict() if faction.current_research != null else {},
 			"total_units_captured": faction.total_units_captured,
+			"event_flags": faction.event_flags.duplicate(),
+			"pending_event_ids": faction.pending_event_ids.duplicate(),
+			"triggered_event_ids": faction.triggered_event_ids.duplicate(),
 		})
 	var region_states: Array[Dictionary] = []
 	var region_ids := regions.keys()
@@ -284,6 +408,14 @@ func apply_save_dict(data: Dictionary) -> PackedStringArray:
 			var research_value: Variant = entry.get("current_research", {})
 			faction.current_research = ResearchState.from_dict(research_value as Dictionary) if research_value is Dictionary and not (research_value as Dictionary).is_empty() else null
 			faction.total_units_captured = int(entry.get("total_units_captured", 0))
+			var flags_value: Variant = entry.get("event_flags", {})
+			faction.event_flags = (flags_value as Dictionary).duplicate() if flags_value is Dictionary else {}
+			faction.pending_event_ids.clear()
+			for pending_value: Variant in entry.get("pending_event_ids", []) as Array:
+				faction.pending_event_ids.append(StringName(pending_value))
+			faction.triggered_event_ids.clear()
+			for triggered_value: Variant in entry.get("triggered_event_ids", []) as Array:
+				faction.triggered_event_ids.append(StringName(triggered_value))
 	else:
 		errors.append("save.faction_states must be an Array")
 

@@ -23,6 +23,21 @@ var current_research: ResearchState = null
 ## single battle's BattleResultState.captured_unit_ids.
 var total_units_captured: int = 0
 
+## DATA_DEFINITION.md section 6.2 / EVENT_DETAIL_SPECIFICATION.md. Set by
+## EventEffectDef.EVENT_FLAG and read by EventConditionEvaluator's
+## event_flag_set condition; also where GameState.resolve_event_choice
+## records "choice:<event_id>" -> chosen choice_id, backing the
+## event_choice_selected condition (past-choice-result triggers).
+var event_flags: Dictionary = {}
+## Events whose condition became true and are waiting to be played (player
+## faction) or auto-resolved (AI factions) before the next ORDERS phase --
+## see TurnManager._begin_faction_turn/GameState.check_pending_events.
+var pending_event_ids: Array[StringName] = []
+## Every EventDef.id ever registered for this faction this campaign, gating
+## once_per_campaign and exclusive_group_id (a second member of the same
+## group can never register once any one member has).
+var triggered_event_ids: Array[StringName] = []
+
 func _init(faction_def: FactionDef) -> void:
 	def = faction_def
 	resources = faction_def.starting_resources

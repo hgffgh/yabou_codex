@@ -8,6 +8,13 @@ const PILOT_CONDITIONS: Array[StringName] = [&"always", &"hp_pct", &"en_pct", &"
 const PILOT_MODIFIERS: Array[StringName] = [
 	&"firepower", &"accuracy", &"evasion", &"armor", &"critical",
 ]
+const EVENT_CONDITION_TYPES: Array[StringName] = [
+	&"turn_at_least", &"turn_at_most", &"region_owned", &"region_not_owned",
+	&"squad_near_region", &"tech_researched", &"pilot_assigned", &"pilots_share_squad",
+	&"pilot_injured", &"relation_band_at_least", &"treaty_active",
+	&"capture_count_at_least", &"region_count_at_least", &"military_power_at_least",
+	&"event_flag_set", &"event_choice_selected",
+]
 
 var _errors: PackedStringArray = []
 var _id_regex := RegEx.new()
@@ -20,6 +27,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
 		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties", &"achievements",
+		&"event_effects", &"events",
 	]:
 		_validate_ids(category, registry.get_category(category))
 	_validate_global_id_uniqueness(registry)
@@ -36,6 +44,8 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	_validate_difficulties(registry)
 	_validate_achievements(registry)
 	_validate_techs(registry)
+	_validate_event_effects(registry)
+	_validate_events(registry)
 	_errors.sort()
 	return _errors.duplicate()
 
@@ -46,6 +56,7 @@ func _validate_global_id_uniqueness(registry: MasterDataRegistry) -> void:
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
 		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties", &"achievements",
+		&"event_effects", &"events",
 	]:
 		for id_value: Variant in registry.get_category(category):
 			var id := StringName(id_value)
@@ -278,6 +289,71 @@ func _validate_achievements(registry: MasterDataRegistry) -> void:
 		var item: Resource = registry.achievements[id]
 		_require_key(item, &"condition_type", &"achievements", id)
 		_range_float(item, &"exp_bonus_pct", 0.0, 0.5, &"achievements", id)
+
+
+func _validate_event_effects(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.event_effects):
+		var item: Resource = registry.event_effects[id]
+		_range_int(item, &"effect_type", 0, 12, &"event_effects", id)
+
+
+func _validate_events(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.events):
+		var item: Resource = registry.events[id]
+		_require_key(item, &"title_key", &"events", id)
+		_reference(item, &"faction_id", &"factions", registry.factions, &"events", id)
+		_range_int(item, &"importance", 0, 1, &"events", id)
+		_validate_condition_tree(item.get("condition_tree"), &"events", id)
+		var seen_choice_ids: Dictionary = {}
+		for choice_value: Variant in item.get("choice_entries") as Array:
+			if not choice_value is Dictionary:
+				_error(&"events", id, "choice_entries entry must be a Dictionary")
+				continue
+			var choice := choice_value as Dictionary
+			var choice_id := StringName(choice.get("id", ""))
+			if choice_id == &"":
+				_error(&"events", id, "choice_entries entry must have a non-empty id")
+			elif seen_choice_ids.has(choice_id):
+				_error(&"events", id, "choice_entries contains duplicate choice id '%s'" % choice_id)
+			seen_choice_ids[choice_id] = true
+			if StringName(choice.get("label_key", "")) == &"":
+				_error(&"events", id, "choice_entries entry '%s' must have a label_key" % choice_id)
+			for effect_value: Variant in choice.get("effect_ids", []) as Array:
+				if not registry.event_effects.has(StringName(effect_value)):
+					_error(&"events", id, "choice '%s' effect_id '%s' does not resolve in event_effects" % [choice_id, effect_value])
+		for effect_value: Variant in item.get("default_effect_ids") as Array:
+			if not registry.event_effects.has(StringName(effect_value)):
+				_error(&"events", id, "default_effect_ids '%s' does not resolve in event_effects" % effect_value)
+		for followup_value: Variant in item.get("followup_event_ids") as Array:
+			if not registry.events.has(StringName(followup_value)):
+				_error(&"events", id, "followup_event_ids '%s' does not resolve in events" % followup_value)
+		for dialogue_value: Variant in item.get("dialogue_entries") as Array:
+			if not dialogue_value is Dictionary or StringName((dialogue_value as Dictionary).get("body_key", "")) == &"":
+				_error(&"events", id, "dialogue_entries entry must be a Dictionary with a non-empty body_key")
+		if (item.get("dialogue_entries") as Array).is_empty() and (item.get("choice_entries") as Array).is_empty() and (item.get("default_effect_ids") as Array).is_empty():
+			_error(&"events", id, "event has no dialogue, choices, or default effects -- it would do nothing")
+
+
+func _validate_condition_tree(tree: Variant, category: StringName, id: StringName) -> void:
+	if not tree is Dictionary:
+		_error(category, id, "condition_tree must be a Dictionary")
+		return
+	var node := tree as Dictionary
+	if node.is_empty():
+		return
+	if node.has("all") or node.has("any"):
+		var children: Variant = node.get("all", node.get("any"))
+		if not children is Array or (children as Array).is_empty():
+			_error(category, id, "condition_tree all/any must be a non-empty Array")
+			return
+		for child: Variant in children as Array:
+			_validate_condition_tree(child, category, id)
+		return
+	if node.has("not"):
+		_validate_condition_tree(node["not"], category, id)
+		return
+	if not EVENT_CONDITION_TYPES.has(StringName(node.get("type", ""))):
+		_error(category, id, "condition_tree has unsupported type '%s'" % node.get("type", ""))
 
 
 func _reference(item: Resource, field: StringName, target_name: StringName, target: Dictionary, category: StringName, id: StringName) -> void:

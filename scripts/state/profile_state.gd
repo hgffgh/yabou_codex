@@ -1,20 +1,25 @@
 class_name ProfileState
 extends RefCounted
 ## DATA_DEFINITION.md section 24, scoped to what this codebase drives today:
-## achievement_ids and the permanent_exp_bonus_pct recomputed from them.
-## Persists across campaigns in its own file (GameState.save_profile/
-## _load_profile), separate from any CampaignSaveData slot -- per
-## SYSTEM_DETAIL_SPECIFICATION.md section 2.3, "実績はキャンペーンセーブと
-## 別のプロフィールへ保存する". encyclopedia_*/unlocked_tech_candidate_ids/
-## viewed_event_ids/settings are not modeled: the encyclopedia and settings
-## menu are out of scope entirely, and the other two belong to systems
-## (tech-node generation, events) that don't exist yet.
+## achievement_ids, the permanent_exp_bonus_pct recomputed from them, and
+## viewed_event_ids (EVENT_DETAIL_SPECIFICATION.md section 6/9: every MAIN
+## event a player has resolved, plus any SUB event explicitly flagged
+## EventDef.once_per_profile -- this is both the once_per_profile gate and
+## the 回想 (recap) unlock list). Persists across campaigns in its own file
+## (GameState.save_profile/_load_profile), separate from any
+## CampaignSaveData slot -- per SYSTEM_DETAIL_SPECIFICATION.md section 2.3,
+## "実績はキャンペーンセーブと別のプロフィールへ保存する".
+## encyclopedia_*/unlocked_tech_candidate_ids/settings are not modeled: the
+## encyclopedia and settings menu are out of scope entirely, and
+## unlocked_tech_candidate_ids belongs to the permanent cross-campaign tech
+## pool TechTreeGenerator explicitly doesn't model yet (see HANDOFF.md).
 
 const MAX_PERMANENT_EXP_BONUS_PCT := 0.50
 
 var profile_version: int = 1
 var achievement_ids: Array[StringName] = []
 var permanent_exp_bonus_pct: float = 0.0
+var viewed_event_ids: Array[StringName] = []
 
 
 func has_achievement(id: StringName) -> bool:
@@ -42,12 +47,27 @@ func recalculate_bonus(registry: MasterDataRegistry) -> void:
 	permanent_exp_bonus_pct = minf(total, MAX_PERMANENT_EXP_BONUS_PCT)
 
 
+func has_viewed_event(id: StringName) -> bool:
+	return viewed_event_ids.has(id)
+
+
+## Returns true only if this call actually added a new entry.
+func mark_event_viewed(id: StringName) -> bool:
+	if id.is_empty() or viewed_event_ids.has(id):
+		return false
+	viewed_event_ids.append(id)
+	return true
+
+
 func to_dict() -> Dictionary:
 	var sorted_ids := achievement_ids.duplicate()
 	sorted_ids.sort_custom(func(a: StringName, b: StringName) -> bool: return String(a) < String(b))
+	var sorted_event_ids := viewed_event_ids.duplicate()
+	sorted_event_ids.sort_custom(func(a: StringName, b: StringName) -> bool: return String(a) < String(b))
 	return {
 		"profile_version": profile_version,
 		"achievement_ids": sorted_ids,
+		"viewed_event_ids": sorted_event_ids,
 	}
 
 
@@ -60,5 +80,11 @@ static func from_dict(data: Dictionary, registry: MasterDataRegistry) -> Profile
 			var id := StringName(id_value)
 			if not id.is_empty() and not state.achievement_ids.has(id):
 				state.achievement_ids.append(id)
+	var event_ids_value: Variant = data.get("viewed_event_ids", [])
+	if event_ids_value is Array:
+		for id_value: Variant in event_ids_value as Array:
+			var id := StringName(id_value)
+			if not id.is_empty() and not state.viewed_event_ids.has(id):
+				state.viewed_event_ids.append(id)
 	state.recalculate_bonus(registry)
 	return state

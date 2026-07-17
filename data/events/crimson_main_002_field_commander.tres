@@ -1,0 +1,29 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"crimson_main_002_field_commander"
+faction_id = &"crimson_empire"
+importance = 0
+priority = 1
+title_key = &"event.crimson_main_002_field_commander.title"
+condition_tree = {
+"all": [{
+"type": "pilot_assigned",
+"pilot_id": &"darius_crimson"
+}, {
+"type": "turn_at_least",
+"turn": 2
+}]
+}
+once_per_profile = false
+once_per_campaign = true
+dialogue_entries = Array[Dictionary]([{
+"speaker_key": &"event.speaker.darius_crimson",
+"body_key": &"event.crimson_main_002_field_commander.dialogue1"
+}])
+choice_entries = Array[Dictionary]([])
+default_effect_ids = Array[StringName]([&"tech_candidate_reinforced_plating"])
+followup_event_ids = Array[StringName]([])

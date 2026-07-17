@@ -1,0 +1,29 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"nova_main_002_veteran_pilot"
+faction_id = &"nova_republic"
+importance = 0
+priority = 1
+title_key = &"event.nova_main_002_veteran_pilot.title"
+condition_tree = {
+"all": [{
+"type": "pilot_assigned",
+"pilot_id": &"aria_nova"
+}, {
+"type": "turn_at_least",
+"turn": 2
+}]
+}
+once_per_profile = false
+once_per_campaign = true
+dialogue_entries = Array[Dictionary]([{
+"speaker_key": &"event.speaker.aria_nova",
+"body_key": &"event.nova_main_002_veteran_pilot.dialogue1"
+}])
+choice_entries = Array[Dictionary]([])
+default_effect_ids = Array[StringName]([&"tech_candidate_en_capacitor_matrix"])
+followup_event_ids = Array[StringName]([])

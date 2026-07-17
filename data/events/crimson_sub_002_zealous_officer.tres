@@ -1,0 +1,25 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"crimson_sub_002_zealous_officer"
+faction_id = &"crimson_empire"
+importance = 1
+priority = 0
+title_key = &"event.crimson_sub_002_zealous_officer.title"
+condition_tree = {
+"type": "event_choice_selected",
+"event_id": &"crimson_main_001_iron_resolve",
+"choice_id": &"aggressive"
+}
+once_per_profile = false
+once_per_campaign = true
+dialogue_entries = Array[Dictionary]([{
+"speaker_key": &"event.speaker.emperor",
+"body_key": &"event.crimson_sub_002_zealous_officer.dialogue1"
+}])
+choice_entries = Array[Dictionary]([])
+default_effect_ids = Array[StringName]([&"funds_boost_large"])
+followup_event_ids = Array[StringName]([])

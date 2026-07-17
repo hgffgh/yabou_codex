@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/event_effect_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"tech_candidate_reinforced_plating"
+effect_type = 2
+payload = {
+"tech_id": &"reinforced_plating"
+}

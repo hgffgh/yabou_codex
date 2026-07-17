@@ -694,6 +694,28 @@ func _on_phase_changed(_phase) -> void:
 	_update_turn_ui()
 	_update_info_panel()
 	_flash_label(_phase_label)
+	_maybe_open_event_panel()
+
+## EVENT_DETAIL_SPECIFICATION.md section 8: pending events play "戦略フェイズ
+## 前", i.e. before the player can act in Phase.ORDERS. TurnManager already
+## populated GameState.get_faction(player_faction_id).pending_event_ids by
+## the time this phase_changed(ORDERS) fires; the panel is a modal overlay
+## (mouse_filter STOP, layer above everything else) so it blocks the player
+## from reaching any other button until every queued event is resolved,
+## which is enough to satisfy "before the strategy phase" without needing
+## TurnManager itself to await UI input mid-turn-advance.
+func _maybe_open_event_panel() -> void:
+	if TurnManager.current_phase != TurnManager.Phase.ORDERS or TurnManager.active_faction_id != GameState.player_faction_id:
+		return
+	var faction := GameState.get_faction(GameState.player_faction_id)
+	if faction == null or faction.pending_event_ids.is_empty():
+		return
+	for child in get_children():
+		if child is EventPanel:
+			return
+	var panel := EventPanel.new()
+	add_child(panel)
+	panel.setup(GameState.player_faction_id)
 
 func _on_active_faction_changed(_faction_id: StringName, _index: int) -> void:
 	_update_turn_ui()
