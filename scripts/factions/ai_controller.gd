@@ -99,9 +99,11 @@ static func _best_squad_destination(
 			continue
 		var score: float
 		if neighbor.owner_faction_id != faction_id:
+			if not neighbor.owner_faction_id.is_empty() and Diplomacy.has_active_treaty(GameState, faction_id, neighbor.owner_faction_id):
+				continue
 			var defender_power := _region_squad_power(neighbor_id, neighbor.owner_faction_id)
 			if defender_power > 0.0:
-				var relation: float = Diplomacy.relation(faction_id, neighbor.owner_faction_id)
+				var relation: float = Diplomacy.friendship(GameState, faction_id, neighbor.owner_faction_id)
 				var required_ratio: float = max(base_required_ratio - relation / 200.0, 1.0)
 				if own_power < defender_power * required_ratio:
 					continue

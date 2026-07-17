@@ -16,6 +16,11 @@ var master_data := MasterDataRegistry.new()
 var master_data_errors: PackedStringArray = []
 var campaign_runtime := CampaignRuntimeState.new()
 var supplied_region_ids_by_faction: Dictionary = {}
+## Backs diplomacy's treaty-proposal roll (Diplomacy.propose_treaty). Reseeded
+## in start_new_game(); tests may pin campaign_rng.seed directly afterward
+## for reproducible rolls, mirroring how battle tests pin BattleRuntimeState's
+## own RNG stream.
+var campaign_rng := RandomNumberGenerator.new()
 
 var turn_number: int = 1
 var factions: Dictionary = {}  # StringName -> Faction
@@ -75,6 +80,8 @@ func start_new_game(chosen_player_faction_id: StringName) -> void:
 		regions[id] = Region.new(region_defs[id])
 	_seed_initial_squads()
 	_seed_initial_pilots()
+	campaign_runtime.ensure_relation_states(factions.keys())
+	campaign_rng.randomize()
 	recompute_all_supply_networks()
 
 	turn_advanced.emit(turn_number)
@@ -82,6 +89,123 @@ func start_new_game(chosen_player_faction_id: StringName) -> void:
 func advance_turn() -> void:
 	turn_number += 1
 	turn_advanced.emit(turn_number)
+
+## DATA_DEFINITION.md section 26: everything a manual save needs from
+## GameState's side (TurnManager.to_save_dict covers the turn-order/phase
+## half). difficulty_id and rng_state are intentionally omitted -- there is
+## no DifficultyDef/difficulty system implemented yet, and no persistent
+## campaign-level RNG exists (only each battle's own transient RNG state).
+func to_save_dict() -> Dictionary:
+	var faction_states: Array[Dictionary] = []
+	var faction_ids := factions.keys()
+	faction_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for faction_id: StringName in faction_ids:
+		var faction := factions[faction_id] as Faction
+		faction_states.append({
+			"faction_id": faction_id,
+			"resources": faction.resources,
+			"funds": faction.funds,
+			"materials": faction.materials,
+			"eliminated": faction.eliminated,
+			"tech_tier": faction.tech_tier,
+			"research_in_progress": faction.research_in_progress,
+			"research_turns_remaining": faction.research_turns_remaining,
+		})
+	var region_states: Array[Dictionary] = []
+	var region_ids := regions.keys()
+	region_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for region_id: StringName in region_ids:
+		var region := regions[region_id] as Region
+		region_states.append({"region_id": region_id, "owner_faction_id": region.owner_faction_id})
+	return {
+		"turn_number": turn_number,
+		"player_faction_id": player_faction_id,
+		"is_game_over": is_game_over,
+		"faction_states": faction_states,
+		"region_states": region_states,
+		"campaign_runtime": campaign_runtime.to_dict(),
+		"campaign_rng_state": campaign_rng.state,
+	}
+
+## Validates everything into temporary structures first and only commits to
+## live factions/regions/campaign_runtime if the whole save parses cleanly
+## against currently-loaded master data -- a bad or stale save file must
+## never leave a half-applied campaign behind.
+func apply_save_dict(data: Dictionary) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var player_id := StringName(data.get("player_faction_id", ""))
+	if player_id.is_empty() or not faction_defs.has(player_id):
+		errors.append("save: player_faction_id does not resolve")
+
+	var campaign_data: Variant = data.get("campaign_runtime", {})
+	var loaded_campaign: Dictionary = {}
+	if not campaign_data is Dictionary:
+		errors.append("save: campaign_runtime must be a Dictionary")
+	else:
+		loaded_campaign = CampaignRuntimeState.from_dict(campaign_data as Dictionary)
+		errors.append_array(loaded_campaign.get("errors", PackedStringArray()))
+		if errors.is_empty():
+			errors.append_array((loaded_campaign.state as CampaignRuntimeState).validate(master_data, region_defs))
+
+	var new_factions: Dictionary = {}
+	for id in faction_defs:
+		new_factions[id] = Faction.new(faction_defs[id])
+	var faction_values: Variant = data.get("faction_states", [])
+	if faction_values is Array:
+		for value: Variant in faction_values:
+			if not value is Dictionary:
+				errors.append("save.faction_states: entry must be a Dictionary")
+				continue
+			var entry := value as Dictionary
+			var faction_id := StringName(entry.get("faction_id", ""))
+			var faction := new_factions.get(faction_id) as Faction
+			if faction == null:
+				errors.append("save.faction_states: faction_id '%s' does not resolve" % faction_id)
+				continue
+			faction.resources = int(entry.get("resources", 0))
+			faction.funds = int(entry.get("funds", 0))
+			faction.materials = int(entry.get("materials", 0))
+			faction.eliminated = bool(entry.get("eliminated", false))
+			faction.tech_tier = int(entry.get("tech_tier", 0))
+			faction.research_in_progress = bool(entry.get("research_in_progress", false))
+			faction.research_turns_remaining = int(entry.get("research_turns_remaining", 0))
+	else:
+		errors.append("save.faction_states must be an Array")
+
+	var new_regions: Dictionary = {}
+	for id in region_defs:
+		new_regions[id] = Region.new(region_defs[id])
+	var region_values: Variant = data.get("region_states", [])
+	if region_values is Array:
+		for value: Variant in region_values:
+			if not value is Dictionary:
+				errors.append("save.region_states: entry must be a Dictionary")
+				continue
+			var entry := value as Dictionary
+			var region_id := StringName(entry.get("region_id", ""))
+			var region := new_regions.get(region_id) as Region
+			if region == null:
+				errors.append("save.region_states: region_id '%s' does not resolve" % region_id)
+				continue
+			region.owner_faction_id = StringName(entry.get("owner_faction_id", ""))
+	else:
+		errors.append("save.region_states must be an Array")
+
+	if not errors.is_empty():
+		errors.sort()
+		return errors
+
+	turn_number = maxi(1, int(data.get("turn_number", 1)))
+	player_faction_id = player_id
+	is_game_over = bool(data.get("is_game_over", false))
+	factions = new_factions
+	for faction_id: StringName in factions:
+		(factions[faction_id] as Faction).is_ai_controlled = faction_id != player_faction_id
+	regions = new_regions
+	campaign_runtime = loaded_campaign.state as CampaignRuntimeState
+	campaign_rng.state = int(data.get("campaign_rng_state", 0))
+	recompute_all_supply_networks()
+	return errors
 
 func get_region(id: StringName) -> Region:
 	return regions.get(id)
@@ -208,6 +332,7 @@ func apply_battle_result(battle: BattleRuntimeState) -> PackedStringArray:
 		unit.current_hp = clampi(battle_unit.current_hp, 0, unit_def.max_hp)
 		unit.current_en = clampi(battle_unit.current_en, 0, unit_def.max_en)
 	_apply_battle_unit_outcomes(battle)
+	_confirm_battle_participant_intel(battle)
 	for squad_id: StringName in battle.attacker_squad_ids + battle.defender_squad_ids:
 		var squad := campaign_runtime.get_squad(squad_id)
 		if squad == null:
@@ -306,6 +431,31 @@ func _apply_pilot_injury(pilot_id: StringName, result: BattleResultState) -> voi
 ## region, re-derived fresh from campaign_runtime. Used to resolve a
 ## multi_faction_battle_pending contact as a sequence of pairwise battles,
 ## where attrition from an earlier sub-battle must carry into the next.
+## COMBAT_DETAIL_SPECIFICATION.md section 24: a squad that engaged in
+## combat becomes confirmed to the faction it fought.
+func _confirm_battle_participant_intel(battle: BattleRuntimeState) -> void:
+	for squad_id: StringName in battle.attacker_squad_ids:
+		campaign_runtime.confirm_squad_intel(battle.defender_faction_id, squad_id, turn_number)
+	for squad_id: StringName in battle.defender_squad_ids:
+		campaign_runtime.confirm_squad_intel(battle.attacker_faction_id, squad_id, turn_number)
+
+## Strategic-layer analogue of COMBAT_DETAIL_SPECIFICATION.md section 24's
+## "十分な索敵を受けた部隊は確認済みになる" (sufficient sensor detection
+## confirms a squad): since the strategic map has no continuous sensor
+## range, a faction's own squad sharing a region with a hostile squad is
+## treated as sufficient detection. Called once at the start of each
+## faction's own turn.
+func refresh_intel_from_colocation(faction_id: StringName) -> void:
+	var region_ids := regions.keys()
+	region_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for region_id: StringName in region_ids:
+		var own_squads := campaign_runtime.get_squads_in_region(region_id, faction_id)
+		if own_squads.is_empty():
+			continue
+		for squad: SquadState in campaign_runtime.get_squads_in_region(region_id):
+			if squad.owner_faction_id != faction_id:
+				campaign_runtime.confirm_squad_intel(faction_id, squad.squad_id, turn_number)
+
 func combat_capable_squad_ids_in_region(region_id: StringName, faction_id: StringName) -> Array[StringName]:
 	var result: Array[StringName] = []
 	for squad: SquadState in campaign_runtime.get_squads_in_region(region_id, faction_id):
@@ -417,9 +567,38 @@ func plan_squad_movement(squad_id: StringName, destination_region_id: StringName
 	var region_def := region_defs.get(squad.region_id) as RegionDef
 	if region_def == null:
 		return PackedStringArray(["movement: source region does not resolve"])
+	var destination := get_region(destination_region_id)
+	if destination != null and not destination.owner_faction_id.is_empty() \
+			and destination.owner_faction_id != acting_faction_id \
+			and Diplomacy.has_active_treaty(self, acting_faction_id, destination.owner_faction_id):
+		return PackedStringArray(["movement: an active treaty forbids entering this faction's territory"])
 	return campaign_runtime.plan_squad_movement(
 		squad_id, destination_region_id, acting_faction_id, region_def.neighbor_ids
 	)
+
+
+## Read-only projection of _run_income_phase's funds/materials accumulation
+## for a faction's currently-owned regions, without mutating anything or
+## advancing production. Used by Diplomacy's gift-offer success-rate term
+## (STRATEGY_DETAIL_SPECIFICATION.md section 11.3), which needs the target
+## faction's "1ターン資金収入" without actually running their turn.
+func estimate_faction_income(faction_id: StringName) -> Dictionary:
+	var funds := 0
+	var materials := 0
+	for region: Region in regions.values():
+		if region.owner_faction_id != faction_id:
+			continue
+		funds += region.def.base_funds_income
+		materials += region.def.base_materials_income
+		for facility_id: StringName in region.def.facility_instance_ids:
+			var instance := master_data.facility_instances.get(facility_id) as FacilityInstanceDef
+			if instance == null:
+				continue
+			var facility_def := master_data.facility_defs.get(instance.facility_def_id) as FacilityDef
+			if facility_def != null:
+				funds += facility_def.funds_income
+				materials += facility_def.materials_income
+	return {"funds": funds, "materials": materials}
 
 
 func _seed_initial_squads() -> void:

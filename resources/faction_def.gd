@@ -12,4 +12,3 @@ extends Resource
 @export var starting_materials: int = 2000
 @export var tech_bonus: Dictionary = {}
 @export var ai_aggression: float = 0.5
-@export var starting_relations: Dictionary = {}

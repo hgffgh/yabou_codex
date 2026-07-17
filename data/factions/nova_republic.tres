@@ -15,5 +15,4 @@ starting_funds = 3000
 starting_materials = 2000
 tech_bonus = {"defense": 0.1}
 ai_aggression = 0.4
-starting_relations = {}
 emblem = ExtResource("2")

@@ -12,6 +12,7 @@ func _initialize() -> void:
 	_test_collision_skip()
 	_test_failed_rollout_is_atomic()
 	_test_stable_serialization_and_round_trip()
+	_test_relation_state_round_trip()
 	_test_disband_and_remove()
 	_test_reset()
 	if _failures.is_empty():
@@ -115,6 +116,51 @@ func _test_stable_serialization_and_round_trip() -> void:
 	)
 	_check(next.unit.instance_id == &"unit_00000003", "restored unit counter reused an ID")
 	_check(next.squad.squad_id == &"squad_00000003", "restored squad counter reused an ID")
+
+
+## DATA_DEFINITION.md section 18: relation_states and diplomacy_log must
+## survive a JSON round trip alongside everything else, and get_relation_state
+## must resolve the same instance regardless of which faction is queried
+## first (STRATEGY_DETAIL_SPECIFICATION.md 18.1's "対称値を原則とする").
+func _test_relation_state_round_trip() -> void:
+	var state := CampaignRuntimeState.new()
+	state.ensure_relation_states([&"nova_republic", &"crimson_empire"])
+	var relation := state.get_relation_state(&"nova_republic", &"crimson_empire")
+	_check(relation.friendship == GameConstants.INITIAL_FRIENDSHIP, "ensure_relation_states did not seed the fixed initial friendship")
+	_check(state.get_relation_state(&"crimson_empire", &"nova_republic") == relation,
+		"get_relation_state must resolve the same instance regardless of argument order")
+
+	relation.friendship = 12
+	relation.treaty_type = GameEnums.TreatyType.CEASEFIRE
+	relation.treaty_turns_remaining = 3
+	relation.violator_faction_id = &"nova_republic"
+	relation.violation_penalty_turns = 10
+	relation.violation_success_penalty_pct = 10
+	state.log_diplomacy(5, &"nova_republic", &"crimson_empire", &"gift", {}, true)  # empty payload: JSON has no int/float distinction, and a numeric payload would spuriously fail the strict to_dict() == saved comparison below
+
+	var saved := state.to_dict()
+	_check(not _contains_object(saved), "campaign save dictionary contains an Object")
+	var decoded: Variant = JSON.parse_string(JSON.stringify(saved))
+	_check(decoded is Dictionary, "campaign JSON did not decode to a Dictionary")
+	if not decoded is Dictionary:
+		return
+	var restored_result := CampaignRuntimeState.from_dict(decoded)
+	_check(restored_result.errors.is_empty(), "campaign restore failed: %s" % restored_result.errors)
+	var restored: CampaignRuntimeState = restored_result.state
+	_check(restored.to_dict() == saved, "campaign JSON round trip changed state")
+	_check(restored.validate(_registry, _regions).is_empty(), "restored campaign failed runtime validation")
+
+	var restored_relation := restored.get_relation_state(&"nova_republic", &"crimson_empire", false)
+	_check(
+		restored_relation != null and restored_relation.friendship == 12
+		and restored_relation.treaty_type == GameEnums.TreatyType.CEASEFIRE
+		and restored_relation.violator_faction_id == &"nova_republic",
+		"relation_states did not survive the JSON round trip",
+	)
+	_check(
+		restored.diplomacy_log.size() == 1 and StringName(restored.diplomacy_log[0].action_type) == &"gift",
+		"diplomacy_log did not survive the JSON round trip",
+	)
 
 
 func _test_disband_and_remove() -> void:

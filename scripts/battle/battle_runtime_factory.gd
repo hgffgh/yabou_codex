@@ -28,11 +28,14 @@ func create_from_pending(
 		state.unit_defs = game_state.master_data.units
 		state.weapon_defs = game_state.master_data.weapons
 		state.pilot_defs = game_state.master_data.pilots
+		state.pilot_skill_defs = game_state.master_data.pilot_skills
 		state.support_skill_defs = game_state.master_data.support_skills
+		state.player_faction_id = game_state.player_faction_id
 	if battle_map != null:
 		state.battle_map_id = battle_map.id
 		state.attacker_hq_id = battle_map.attacker_hq_id
 		state.defender_hq_id = battle_map.defender_hq_id
+		state.environment = battle_map.environment
 		attacker_spawn = Vector3(battle_map.attacker_spawn_transform.origin.x, battle_map.attacker_spawn_transform.origin.z, 0.0)
 		defender_spawn = Vector3(battle_map.defender_spawn_transform.origin.x, battle_map.defender_spawn_transform.origin.z, 0.0)
 	if state.region_id.is_empty() or state.attacker_faction_id.is_empty() or state.defender_faction_id.is_empty(): errors.append("battle factory: region and factions must resolve")
@@ -118,6 +121,7 @@ func _build_side(state: BattleRuntimeState, ids: Array[StringName], campaign: Ca
 			if pilot_def != null:
 				var pilot_state := campaign.get_pilot(strategic_unit.pilot_id)
 				var level := pilot_state.level if pilot_state != null else pilot_def.initial_level
+				battle_unit.pilot_level = level
 				battle_unit.shooting = _effective_stat(pilot_def.initial_shooting, pilot_def.growth_shooting, level)
 				battle_unit.melee = _effective_stat(pilot_def.initial_melee, pilot_def.growth_melee, level)
 				battle_unit.defense = _effective_stat(pilot_def.initial_defense, pilot_def.growth_defense, level)

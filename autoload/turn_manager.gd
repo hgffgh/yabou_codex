@@ -78,6 +78,157 @@ func _build_faction_turn_order(player_faction_id: StringName) -> void:
 		if not faction_turn_order.has(faction_id):
 			faction_turn_order.append(faction_id)
 
+## DATA_DEFINITION.md section 26: current_phase/is_resolving_turn are not
+## saved because a manual save is only ever possible during Phase.ORDERS on
+## the player's own, non-resolving turn (see save_game's gate) -- that
+## state is implied rather than persisted, and restored directly on load.
+func to_save_dict() -> Dictionary:
+	return {
+		"faction_turn_order": faction_turn_order.duplicate(),
+		"active_faction_index": active_faction_index,
+	}
+
+func apply_save_dict(data: Dictionary) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var order_value: Variant = data.get("faction_turn_order", [])
+	if not order_value is Array or (order_value as Array).is_empty():
+		errors.append("save.turn_manager: faction_turn_order must be a non-empty Array")
+		return errors
+	var order: Array[StringName] = []
+	for item: Variant in order_value as Array:
+		order.append(StringName(item))
+	for faction_id: StringName in order:
+		if not GameState.factions.has(faction_id):
+			errors.append("save.turn_manager: faction_turn_order entry '%s' does not resolve" % faction_id)
+	var index := int(data.get("active_faction_index", 0))
+	if index < 0 or index >= order.size():
+		errors.append("save.turn_manager: active_faction_index is out of range")
+	if not errors.is_empty():
+		errors.sort()
+		return errors
+
+	faction_turn_order = order
+	active_faction_index = index
+	active_faction_id = faction_turn_order[active_faction_index]
+	current_phase = Phase.ORDERS
+	is_resolving_turn = false
+	pending_battle_states.clear()
+	pending_squad_battles.clear()
+	last_combat_log.clear()
+	return errors
+
+const SAVE_DIRECTORY := "user://saves/"
+const SAVE_VERSION := 1
+
+func _save_path(slot: int) -> String:
+	return SAVE_DIRECTORY + "slot_%02d.json" % slot
+
+## DATA_DEFINITION.md section 26.2: manual saves are only ever possible
+## during the player's own Phase.ORDERS, not mid-resolution or on an AI turn.
+func can_save_now() -> bool:
+	return not GameState.is_game_over and active_faction_id == GameState.player_faction_id and current_phase == Phase.ORDERS and not is_resolving_turn
+
+func save_game(slot: int) -> PackedStringArray:
+	var errors := PackedStringArray()
+	if not can_save_now():
+		errors.append("save: manual saves are only available during the player's own strategy phase")
+		return errors
+	var data := {
+		"save_version": SAVE_VERSION,
+		"saved_at_unix": Time.get_unix_time_from_system(),
+		"campaign": GameState.to_save_dict(),
+		"turn_manager": to_save_dict(),
+	}
+	var dir_error := DirAccess.make_dir_recursive_absolute(SAVE_DIRECTORY)
+	if dir_error != OK and dir_error != ERR_ALREADY_EXISTS:
+		errors.append("save: could not create the save directory (error %d)" % dir_error)
+		return errors
+	var file := FileAccess.open(_save_path(slot), FileAccess.WRITE)
+	if file == null:
+		errors.append("save: could not open the save file for writing (error %d)" % FileAccess.get_open_error())
+		return errors
+	file.store_string(JSON.stringify(data))
+	file.close()
+	return errors
+
+## Applies GameState's half first, then this autoload's own, since
+## TurnManager.apply_save_dict validates faction_turn_order entries against
+## GameState.factions and needs that already rebuilt.
+func load_game(slot: int) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var path := _save_path(slot)
+	if not FileAccess.file_exists(path):
+		errors.append("load: save slot %d does not exist" % slot)
+		return errors
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		errors.append("load: could not open the save file (error %d)" % FileAccess.get_open_error())
+		return errors
+	var text := file.get_as_text()
+	file.close()
+	var parsed: Variant = JSON.parse_string(text)
+	if not parsed is Dictionary:
+		errors.append("load: save file is not valid JSON")
+		return errors
+	var data := parsed as Dictionary
+	var campaign_data: Variant = data.get("campaign", {})
+	var turn_manager_data: Variant = data.get("turn_manager", {})
+	if not campaign_data is Dictionary or not turn_manager_data is Dictionary:
+		errors.append("load: save file is missing its campaign/turn_manager sections")
+		return errors
+
+	var campaign_errors := GameState.apply_save_dict(campaign_data as Dictionary)
+	if not campaign_errors.is_empty():
+		errors.append_array(campaign_errors)
+		return errors
+	var turn_errors := apply_save_dict(turn_manager_data as Dictionary)
+	if not turn_errors.is_empty():
+		errors.append_array(turn_errors)
+		return errors
+
+	GameState.turn_advanced.emit(GameState.turn_number)
+	active_faction_changed.emit(active_faction_id, active_faction_index)
+	phase_changed.emit(current_phase)
+	return errors
+
+func list_save_slots() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var dir := DirAccess.open(SAVE_DIRECTORY)
+	if dir == null:
+		return result
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir() and file_name.begins_with("slot_") and file_name.ends_with(".json"):
+			var slot := int(file_name.trim_prefix("slot_").trim_suffix(".json"))
+			var info := _read_save_summary(slot)
+			if not info.is_empty():
+				result.append(info)
+		file_name = dir.get_next()
+	dir.list_dir_end()
+	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.slot) < int(b.slot))
+	return result
+
+func _read_save_summary(slot: int) -> Dictionary:
+	var file := FileAccess.open(_save_path(slot), FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	if not parsed is Dictionary:
+		return {}
+	var data := parsed as Dictionary
+	var campaign_data: Variant = data.get("campaign", {})
+	if not campaign_data is Dictionary:
+		return {}
+	var campaign := campaign_data as Dictionary
+	return {
+		"slot": slot,
+		"saved_at_unix": int(data.get("saved_at_unix", 0)),
+		"turn_number": int(campaign.get("turn_number", 0)),
+		"player_faction_id": StringName(campaign.get("player_faction_id", "")),
+	}
+
 func _begin_faction_turn() -> void:
 	active_faction_id = faction_turn_order[active_faction_index]
 	active_faction_changed.emit(active_faction_id, active_faction_index)
@@ -86,6 +237,7 @@ func _begin_faction_turn() -> void:
 	_run_income_phase(active_faction_id)
 	GameState.advance_repairs_for_faction(active_faction_id)
 	GameState.advance_pilot_injuries_for_faction(active_faction_id)
+	GameState.refresh_intel_from_colocation(active_faction_id)
 	_set_phase(Phase.ORDERS)
 
 ## Called by the StrategicMap UI's "End Turn" button.
@@ -115,11 +267,12 @@ func commit_turn() -> void:
 func _finish_active_faction_turn() -> void:
 	_set_phase(Phase.MOVEMENT)
 	_run_movement_phase(active_faction_id)
+	GameState.refresh_intel_from_colocation(active_faction_id)
 	_set_phase(Phase.COMBAT)
 	await _run_combat_phase()
 	turn_events_ready.emit(_build_world_events_summary())
 	_set_phase(Phase.DIPLOMACY)
-	Diplomacy.apply_combat_events(last_combat_log)
+	Diplomacy.apply_combat_events(GameState, last_combat_log)
 	_set_phase(Phase.VICTORY_CHECK)
 	_run_victory_check(false)
 
@@ -224,8 +377,11 @@ func _resolve_squad_battle(pending: Dictionary) -> void:
 	if created.errors.is_empty():
 		var battle := created.state as BattleRuntimeState
 		pending_battle_states.append(battle)
-		battle_runtime_ready.emit(battle)
-		await battle_runtime_finished
+		if _battle_involves_player(battle):
+			battle_runtime_ready.emit(battle)
+			await battle_runtime_finished
+		else:
+			_auto_resolve_battle(battle)
 		if battle.result != null:
 			last_combat_log.append({
 				"type": "battle",
@@ -246,6 +402,31 @@ func complete_battle_runtime(battle: BattleRuntimeState) -> PackedStringArray:
 		battle_runtime_finished.emit(battle.battle_id)
 	return errors
 
+func _battle_involves_player(battle: BattleRuntimeState) -> bool:
+	return battle.attacker_faction_id == GameState.player_faction_id or battle.defender_faction_id == GameState.player_faction_id
+
+## A battle neither side of which is the player never emits battle_runtime_ready
+## (strategic_map.gd would otherwise pop a BattlePrototypeView for every
+## battle unconditionally), so it is simulated to completion synchronously
+## here instead, using the same deterministic BattleRuntimeState/
+## BattleCombatSystem the interactive view drives. Stepping in whole
+## seconds (rather than one call covering the full 300-second cap) keeps
+## elapsed_world_sec advancing accurately throughout, since a few call
+## sites (e.g. the firing-disclosure reveal window) read it mid-battle.
+func _auto_resolve_battle(battle: BattleRuntimeState) -> void:
+	const AUTO_RESOLVE_STEP_SEC := 1.0
+	var max_iterations := int(ceil(BattleRuntimeState.MAX_WORLD_SEC / AUTO_RESOLVE_STEP_SEC)) + 5
+	var iterations := 0
+	while battle.result == null and iterations < max_iterations:
+		battle.advance_time(AUTO_RESOLVE_STEP_SEC)
+		iterations += 1
+	if battle.result == null:
+		push_error("Auto-resolved battle '%s' did not finalize within the world-time cap" % battle.battle_id)
+		return
+	var errors := complete_battle_runtime(battle)
+	if not errors.is_empty():
+		push_error("Failed to apply auto-resolved battle '%s': %s" % [battle.battle_id, errors])
+
 func _build_world_events_summary() -> String:
 	var lines: Array = []
 	for entry in last_combat_log:
@@ -265,7 +446,7 @@ func _build_world_events_summary() -> String:
 	return "\n".join(lines)
 
 func _run_diplomacy_week_end() -> void:
-	Diplomacy.tick_drift()
+	Diplomacy.tick_week(GameState, GameState.turn_number)
 
 func _run_victory_check(check_turn_cap: bool = false) -> bool:
 	var player_faction: Faction = GameState.get_faction(GameState.player_faction_id)

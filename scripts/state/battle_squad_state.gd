@@ -26,3 +26,9 @@ var intel_confirmed: bool = false
 var currently_sensed: bool = false
 var last_known_world_position: Vector3 = Vector3.ZERO
 var revealed_until_world_sec: float = 0.0
+
+## Opt-out for BattleRuntimeState._advance_ai_squad_orders' automatic
+## destination-picking (used by tests/fixtures that need a non-player
+## squad to hold an exact, manually-assigned position; real battles never
+## need to set this).
+var movement_ai_disabled: bool = false

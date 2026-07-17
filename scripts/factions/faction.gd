@@ -6,7 +6,6 @@ var def: FactionDef
 var resources: int
 var funds: int
 var materials: int
-var relations: Dictionary = {}  # other faction_id -> int (-100..100)
 var is_ai_controlled: bool
 var eliminated: bool = false
 
@@ -23,5 +22,4 @@ func _init(faction_def: FactionDef) -> void:
 	resources = faction_def.starting_resources
 	funds = faction_def.starting_funds
 	materials = faction_def.starting_materials
-	relations = faction_def.starting_relations.duplicate()
 	is_ai_controlled = faction_def.is_ai_controlled

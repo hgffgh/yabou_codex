@@ -82,3 +82,47 @@ const APTITUDE_EVASION_ADDITIONS: Dictionary = {
 	GameEnums.EnvironmentAptitude.STANDARD: 0,
 	GameEnums.EnvironmentAptitude.POOR: -10,
 }
+
+## STRATEGY_DETAIL_SPECIFICATION.md section 11: diplomacy.
+const FRIENDSHIP_MIN: int = -100
+const FRIENDSHIP_MAX: int = 100
+const INITIAL_FRIENDSHIP: int = -50
+const TREATY_ACTIVE_FRIENDSHIP_GAIN_PER_TURN: int = 1
+const COMBAT_FRIENDSHIP_PENALTY: int = -15
+
+const CEASEFIRE_DURATIONS: Array[int] = [3, 5, 10]
+const NON_AGGRESSION_DURATIONS: Array[int] = [10, 20, 30]
+const TREATY_BASE_SUCCESS_PCT: Dictionary = {
+	GameEnums.TreatyType.CEASEFIRE: 60,
+	GameEnums.TreatyType.NON_AGGRESSION: 40,
+}
+## Success-rate penalty by treaty type and chosen duration (11.3's table).
+const TREATY_DURATION_PENALTY_PCT: Dictionary = {
+	GameEnums.TreatyType.CEASEFIRE: {3: 0, 5: 5, 10: 10},
+	GameEnums.TreatyType.NON_AGGRESSION: {10: 0, 20: 10, 30: 20},
+}
+const FRIENDSHIP_SUCCESS_MULTIPLIER: float = 0.25
+const POWER_RATIO_SUCCESS_MULTIPLIER: float = 20.0
+const POWER_RATIO_SUCCESS_CLAMP_PCT: float = 10.0
+const GIFT_OFFER_SUCCESS_MULTIPLIER: float = 5.0
+const GIFT_OFFER_SUCCESS_MAX_PCT: float = 30.0
+const TREATY_SUCCESS_MIN_PCT: int = 5
+const TREATY_SUCCESS_MAX_PCT: int = 95
+
+const DIPLOMACY_PROPOSAL_COOLDOWN_TURNS: int = 5
+const DIPLOMACY_GIFT_COOLDOWN_TURNS: int = 5
+const DIPLOMACY_INTEL_PURCHASE_COOLDOWN_TURNS: int = 5
+
+const TREATY_VIOLATION_FRIENDSHIP_PENALTY: int = 20
+const TREATY_VIOLATION_SUCCESS_PENALTY_PCT: int = 10
+const TREATY_VIOLATION_PENALTY_TURNS: int = 10
+
+const MIN_GIFT_FUNDS: int = 300
+const MIN_GIFT_MATERIALS: int = 200
+const GIFT_FRIENDSHIP_GAIN: int = 5
+
+const INTEL_PURCHASE_COST_FUNDS: int = 2000
+
+## Ransom price is 75% of the unit's production funds cost (11.8: 225/450/900
+## for light/standard/heavy against the 300/600/1200 UNIT_PRODUCTION_FUNDS).
+const RANSOM_PRICE_PCT: float = 0.75

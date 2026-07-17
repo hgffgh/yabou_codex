@@ -19,7 +19,13 @@ func _initialize() -> void:
 	var attacker_state := battle.squad_states_by_id[attacker.squad.squad_id] as BattleSquadState
 	var defender_state := battle.squad_states_by_id[defender.squad.squad_id] as BattleSquadState
 	attacker_state.world_position = Vector3(500, 0, 0)
+	attacker_state.destination = attacker_state.world_position
 	defender_state.world_position = Vector3(300, 300, 0)
+	defender_state.destination = defender_state.world_position
+	# This fixture is testing capture-gauge math in isolation: pin the
+	# defender in place so BattleRuntimeState._advance_ai_squad_orders
+	# doesn't have it rush back toward its own (here, contested) HQ.
+	defender_state.movement_ai_disabled = true
 	battle.time_scale = 0.0
 	battle.advance_time(10.0)
 	var defender_hq := battle.control_point_states[battle.defender_hq_id] as BattleControlPointState

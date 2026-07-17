@@ -1,0 +1,18 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/pilot_skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"darius_command_aura"
+display_name_key = &"pilot_skill.darius_command_aura.name"
+description_key = &"pilot_skill.darius_command_aura.description"
+unlock_level = 10
+leader_only = true
+condition_type = &"always"
+condition_value = 0.0
+modifiers = {
+&"armor": 20.0,
+&"evasion": 10.0
+}
+action_skill_id = &""

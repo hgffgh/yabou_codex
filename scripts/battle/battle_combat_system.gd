@@ -249,7 +249,7 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 		var reaction_bonus := (float(target.reaction) - 100.0) * 0.2
 		var attack_command := (float(_active_leader_command(battle, attacker_squad)) - 100.0) * 0.1
 		var defense_command := (float(_active_leader_command(battle, target_squad)) - 100.0) * 0.1
-		var accuracy := clampi(roundi(float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command - (10.0 if target.defending else 0.0)), 5, 95)
+		var accuracy := clampi(roundi(float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command - (10.0 if target.defending else 0.0) + pilot_skill_modifier(battle, attacker, &"accuracy") - pilot_skill_modifier(battle, target, &"evasion")), 5, 95)
 		var hit := roll(battle, 100) < accuracy
 		var damage := 0
 		var critical := false
@@ -257,11 +257,11 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 			var hit_power := float(weapon.total_power) / float(weapon.hit_count)
 			var pilot_firepower := float(attack_skill - 100)
 			var pilot_armor := float(roundi((float(target.defense) - 100.0) * 0.5))
-			var effective_armor := maxf(0.0, float(target_def.armor) + pilot_armor + (20.0 if target.defending else 0.0) - float(weapon.penetration))
-			var base_damage := maxf(hit_power * 0.05, float(attacker_def.firepower) + pilot_firepower + hit_power - effective_armor)
+			var effective_armor := maxf(0.0, float(target_def.armor) + pilot_armor + (20.0 if target.defending else 0.0) - float(weapon.penetration) + pilot_skill_modifier(battle, target, &"armor"))
+			var base_damage := maxf(hit_power * 0.05, float(attacker_def.firepower) + pilot_firepower + hit_power - effective_armor + pilot_skill_modifier(battle, attacker, &"firepower"))
 			base_damage *= _attribute_multiplier(target_def, weapon.damage_attribute)
 			base_damage *= float(90 + roll(battle, 21)) / 100.0
-			var critical_rate := clampi(weapon.base_critical_pct + floori(float(attacker.reaction - 100) / 10.0), 0, 50)
+			var critical_rate := clampi(weapon.base_critical_pct + floori(float(attacker.reaction - 100) / 10.0) + roundi(pilot_skill_modifier(battle, attacker, &"critical")), 0, 50)
 			critical = roll(battle, 100) < critical_rate
 			if critical: base_damage *= 1.5
 			damage = roundi(base_damage)
@@ -280,6 +280,45 @@ static func _attribute_multiplier(unit_def: UnitDef, attribute: int) -> float:
 		GameEnums.DamageAttribute.BEAM: return unit_def.beam_damage_multiplier
 		GameEnums.DamageAttribute.MELEE: return unit_def.melee_damage_multiplier
 	return 1.0
+
+## STRATEGY_DETAIL_SPECIFICATION.md section 5.6: sums every modifier of
+## `key` (one of PILOT_MODIFIERS in master_data_validator.gd) across a
+## pilot's currently-unlocked, condition-satisfied skills. Generic pilots
+## (empty pilot_id) always contribute 0.
+static func pilot_skill_modifier(battle: BattleRuntimeState, unit: BattleUnitState, key: StringName) -> float:
+	if unit.pilot_id.is_empty():
+		return 0.0
+	var pilot_def := battle.pilot_defs.get(unit.pilot_id) as PilotDef
+	if pilot_def == null:
+		return 0.0
+	var squad := battle.squad_states_by_id.get(unit.squad_id) as BattleSquadState
+	var total := 0.0
+	for skill_id: StringName in pilot_def.skill_ids:
+		var skill := battle.pilot_skill_defs.get(skill_id) as PilotSkillDef
+		if skill == null or unit.pilot_level < skill.unlock_level:
+			continue
+		if skill.leader_only and (squad == null or squad.leader_unit_id != unit.unit_instance_id):
+			continue
+		if not _pilot_skill_condition_met(battle, unit, skill):
+			continue
+		total += float(skill.modifiers.get(key, 0.0))
+	return total
+
+## PILOT_CONDITIONS in master_data_validator.gd: always, hp_pct, en_pct,
+## environment. hp_pct/en_pct trigger at or below condition_value (a
+## desperation-style threshold, matching the DEFENSIVE-policy 30% HP
+## convention already used elsewhere in this file).
+static func _pilot_skill_condition_met(battle: BattleRuntimeState, unit: BattleUnitState, skill: PilotSkillDef) -> bool:
+	match skill.condition_type:
+		&"always":
+			return true
+		&"hp_pct":
+			return unit.max_hp > 0 and float(unit.current_hp) / float(unit.max_hp) <= skill.condition_value
+		&"en_pct":
+			return unit.max_en > 0 and float(unit.current_en) / float(unit.max_en) <= skill.condition_value
+		&"environment":
+			return int(skill.condition_value) == battle.environment
+	return false
 
 static func roll(battle: BattleRuntimeState, upper: int) -> int:
 	battle.rng_state = int((battle.rng_state * 1664525 + 1013904223) & 0x7fffffff)

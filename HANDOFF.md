@@ -146,6 +146,195 @@ scaffolding):
   squad is unconfirmed -- the existing five-band rating already hides exact
   numbers, which covers most of the intent.
 
+The pilot skills milestone (STRATEGY_DETAIL_SPECIFICATION.md section 5.6) is
+complete for passive combat modifiers:
+
+- `BattleCombatSystem.pilot_skill_modifier(battle, unit, key)` sums a
+  pilot's `modifiers[key]` across every skill in `PilotDef.skill_ids` that
+  is currently unlocked (`BattleUnitState.pilot_level >= unlock_level`),
+  passes its `leader_only` gate, and satisfies its `condition_type`
+  (`always`, `hp_pct`/`en_pct` at-or-below `condition_value`, or
+  `environment` matching the battle's own environment) -- exactly the
+  `PILOT_CONDITIONS`/`PILOT_MODIFIERS` sets `master_data_validator.gd` was
+  already validating against with no consumer. Applied to accuracy,
+  evasion, firepower, armor, and critical rate in `_resolve_attack`.
+- `BattleRuntimeState.environment` (new field, from `BattleMapDef.environment`)
+  and `BattleUnitState.pilot_level` (snapshotted at battle creation from
+  `PilotState.level`) back the `environment`/unlock-level checks.
+- `res://data/pilot_skills/` was empty, so this pass also authored the
+  first sample data: two skills each for `aria_nova` and `darius_crimson`
+  (one Lv1 always-on, one Lv10 conditional/leader-only), covering all four
+  condition types and all five modifier keys between the sample data and
+  `pilot_skills_test.gd`'s synthetic-pilot cases.
+- Deferred: `PilotSkillDef.action_skill_id` (granting an additional active
+  support skill beyond `UnitDef.support_skill_ids`) is validated but not
+  read anywhere -- none of the sample skills use it, and it is a distinct
+  mechanic from the passive-modifier system implemented here.
+
+The strategic-layer persistent intel milestone (DATA_DEFINITION.md section 21
+/ COMBAT_DETAIL_SPECIFICATION.md section 24 / STRATEGY_DETAIL_SPECIFICATION.md
+section 6) is complete, closing the "no persistent, cross-battle intel"
+deferral from the in-battle fog-of-war milestone above:
+
+- New `IntelRecordState` (trimmed to the strategic layer: observer, target
+  squad, `IntelState`, the `target_revision` snapshot used for staleness,
+  and `last_seen_turn`) lives in `CampaignRuntimeState.intel_records_by_key`,
+  is saved/loaded/validated alongside pilots and units, and persists across
+  turns and battles rather than resetting each fight like the battle-view
+  fog state does.
+- Two confirmation triggers: `GameState._confirm_battle_participant_intel`
+  (both sides of a resolved battle confirm each other, called from
+  `apply_battle_result`) and `GameState.refresh_intel_from_colocation`
+  (a faction's own squad sharing a region with a hostile one counts as
+  "sufficient sensor detection" at strategic, discrete-region granularity
+  -- there is no continuous sensor-range model at this layer). The latter
+  runs both at each faction's turn start and right after its movement
+  phase, so a squad that just moved into contact is confirmed before that
+  turn's combat phase resolves.
+- `CampaignRuntimeState.is_squad_confirmed` treats a stored record as stale
+  (and therefore unconfirmed again) once the target squad's `intel_revision`
+  no longer matches what was recorded -- a composition change silently
+  invalidates old intel rather than needing an explicit revert step.
+- `RegionNodeView.update_squad_badge()` now excludes unconfirmed hostile
+  squads from the composition/count it renders and shows a distinct "?"
+  badge instead, rather than always revealing every squad's exact makeup
+  on the strategic map regardless of faction.
+- Still deferred: the intel-purchase feature (STRATEGY_DETAIL_SPECIFICATION.md
+  section 11.7) and encyclopedia registration. The `IntelRecordState`/
+  `confirm_squad_intel` machinery built here makes purchase straightforward
+  to add later (call `confirm_squad_intel` for a third party's squads,
+  gated by cost and a cooldown), but the UI hook and cooldown tracking
+  aren't built yet.
+- A `region_node_view.gd` UI-level test was attempted but dropped: directly
+  instantiating `RegionNodeView` as the first thing a `--script` test entry
+  point compiles hits a headless-only GDScript compile-order failure
+  ("Identifier not found: GameState") that reproduces on *any* bare
+  `GameState.` reference in that file, including lines that predate this
+  change and already work fine through the normal autoload-boot path (e.g.
+  `strategic_map_smoke_test.gd`, which builds real `RegionNodeView`
+  instances through the full scene, passes). The badge-gating logic is
+  covered by `strategic_intel_test.gd`'s `CampaignRuntimeState`-level
+  checks and by code review instead.
+
+The AI-vs-AI battle auto-resolution milestone is complete:
+
+- `TurnManager._resolve_squad_battle` now branches on
+  `_battle_involves_player` (attacker or defender faction id matches
+  `GameState.player_faction_id`). Player-involved battles keep the
+  existing `battle_runtime_ready` / `BattlePrototypeView` flow unchanged;
+  a battle between two non-player factions is never emitted for the UI at
+  all (`strategic_map.gd`'s `_on_battle_runtime_ready` would otherwise pop
+  a view for *every* emitted battle unconditionally) and instead runs
+  through `_auto_resolve_battle`.
+- `_auto_resolve_battle` drives the same deterministic
+  `BattleRuntimeState.advance_time`/`BattleCombatSystem` simulation the
+  interactive view uses, synchronously, in whole-second steps up to the
+  300-second world-time cap, then calls the existing
+  `complete_battle_runtime` (so campaign application, the diplomacy log
+  entry, and pending-battle bookkeeping all go through the identical path
+  either way). Whole-second steps (rather than one call covering the full
+  300 seconds) matter because a few things — the firing-disclosure reveal
+  window in particular — read `elapsed_world_sec` mid-battle, and
+  `advance_time` clamps that field to the cap *before* simulating, so one
+  giant call would leave it pinned at 300 for the whole run instead of
+  advancing incrementally.
+- This also resolves the sequential multi-faction pairwise battles from
+  the earlier combat-routing milestone the same way: each sub-battle
+  independently checks player involvement, so a player fighting faction A
+  while factions B and C also clash in the same region no longer forces
+  the player to click through every unrelated fight.
+- Every combat contact still resolves before the faction turn advances
+  (no behavior change there) — what changed is *who* has to watch it
+  happen.
+
+The battle squad movement/AI milestone is complete, scoped to what's
+tractable through code alone -- see the explicit deferrals below:
+
+- Destination-seeking squad movement moved from `BattlePrototypeView._process`
+  into `BattleRuntimeState._advance_squad_movement` (called from
+  `advance_time`), with `_squad_speed` (unit speed / 10 m/s, slowest
+  surviving unit) also relocated so it no longer needs a live `GameState`
+  lookup. This was a real, previously-undiscovered gap in the AI
+  auto-resolve milestone above: since movement only ever ran inside the
+  interactive view's per-frame `_process`, an auto-resolved (headless)
+  battle never moved a single squad, and could only ever produce a fight
+  if a map's spawn points happened to already be in weapon range of each
+  other.
+- New `BattleRuntimeState._advance_ai_squad_orders` (also called from
+  `advance_time`) closes "defending squads never move, retreat, or defend
+  on their own": any squad whose faction isn't the new
+  `player_faction_id` snapshot (set by `battle_runtime_factory.gd` from
+  `GameState.player_faction_id` at creation, so the simulation itself
+  never needs a live autoload dependency) picks its own destination every
+  tick. OFFENSIVE/BALANCED squads press toward the nearest living enemy
+  squad; DEFENSIVE/SUPPORT/RETREAT squads hold near their own HQ instead
+  of charging out (they still fight normally if approached -- engagement
+  triggers on weapon-range contact independent of this). RETREAT-policy
+  squads also auto-`request_retreat()` once squad HP drops to 30% or
+  below, per STRATEGY_DETAIL_SPECIFICATION.md's policy table, regardless
+  of who controls the squad (policy selection is the trigger, not manual
+  play).
+- New `BattleSquadState.movement_ai_disabled` opt-out flag, for
+  fixtures/tests that need a non-player squad to hold an exact manually-
+  assigned position (`battle_capture_system_test.gd`'s HQ-capture-timing
+  fixture needed this once its defender started rushing back to protect
+  its own, here deliberately undefended, HQ -- correct new behavior, but
+  incompatible with that test's old "frozen prop" assumption).
+- Found and fixed a related bug while chasing a test regression from this
+  change: several fixtures set a squad's `world_position` directly without
+  also updating `destination`, which used to be harmless (movement never
+  ran headless) but now caused the squad to visibly drift back toward its
+  stale spawn-point destination once movement started running everywhere.
+  `battle_capture_system_test.gd` now sets both together.
+- Explicitly deferred: `TerrainZoneDef`/`TerrainEffect` (no resource class
+  exists, and there is no scene geometry to attach zones to yet); true
+  NavigationRegion3D pathfinding/obstacle avoidance (needs an editor-baked
+  navmesh, not practical to add through text-based tools); and
+  COMBAT_DETAIL_SPECIFICATION.md section 26's in-round approach/withdrawal
+  mechanic, which operates on an abstract per-engagement distance
+  explicitly decoupled from `world_position` ("ラウンド内の距離変化は
+  戦場マップ上の実位置へ反映しない") and can shift which weapons stay in
+  range mid-round -- a distinct, intricate mechanic from the pre-contact
+  positioning implemented here, deserving its own pass.
+
+The save/load milestone is complete for manual saves, scoped to what the
+current (legacy, simplified) `CampaignConfig` and data model can actually
+support -- see the explicit deferrals below:
+
+- `GameState.to_save_dict()`/`apply_save_dict(data)` cover turn_number,
+  player_faction_id, is_game_over, per-faction state (funds/materials/
+  resources/eliminated/tech_tier/research progress/relations), per-region
+  `owner_faction_id`, and `campaign_runtime` nested via its existing
+  `to_dict()`/`from_dict()` (units/squads/pilots/production/intel all come
+  along for free). `TurnManager.to_save_dict()`/`apply_save_dict(data)`
+  cover `faction_turn_order`/`active_faction_index`; `current_phase`/
+  `is_resolving_turn` are not saved at all, since a manual save is only
+  ever possible during the player's own `Phase.ORDERS` in the first place
+  (`TurnManager.can_save_now()`) -- that state is implied and restored
+  directly rather than persisted.
+- Both `apply_save_dict` methods validate everything into temporary
+  structures first (including running `CampaignRuntimeState.validate()`
+  against the currently-loaded master data) and only commit to live state
+  if the whole save parses cleanly -- a bad or stale save file can never
+  leave a half-applied campaign behind. `GameState`'s half is always
+  applied before `TurnManager`'s, since the latter validates
+  `faction_turn_order` entries against `GameState.factions`.
+- `TurnManager.save_game(slot)`/`load_game(slot)`/`list_save_slots()`
+  read/write JSON to `user://saves/slot_NN.json`. A `SaveLoadPanel`
+  (matching `DevelopmentPanel`'s overlay style), reachable from a new
+  "セーブ/ロード" button on the strategic map's top bar, lists ten fixed
+  slots with turn/faction/timestamp and per-slot save/load actions, save
+  disabled outside `Phase.ORDERS`.
+- Explicitly deferred: autosave triggering and the manual/auto slot-count
+  split (the full `CampaignConfig` schema's `manual_save_slots`/
+  `autosave_slots` fields don't exist on the current simplified
+  `resources/campaign_config.gd`, so this pass just supports ten
+  fixed manual slots with no autosave tier); `difficulty_id` (no
+  `DifficultyDef`/difficulty system exists at all yet); and `rng_state`
+  (there is no persistent campaign-level RNG to save -- only each
+  battle's own transient, battle-scoped RNG state, which is explicitly
+  out of scope for a manual save since battles never save mid-fight).
+
 ## Source of truth
 
 Read these documents in this order:
@@ -209,45 +398,68 @@ Relevant prototype files:
 
 The legacy `UnitStack`/`CombatResolver`/`BattleVignette` prototype path is
 gone, battle-result application (destroyed/recovered/captured/lost,
-diplomacy penalties) is complete, named pilots now level up, earn EXP, and
-get injured per spec, and the battle view now respects sensor-based fog of
-war. The remaining gaps, in rough order of value:
+diplomacy penalties) is complete, named pilots now level up, earn EXP, get
+injured, and apply passive skill modifiers per spec, the battle view respects
+sensor-based fog of war with that confirmation also persisting at the
+strategic layer, AI-vs-AI battles auto-resolve without blocking on the
+player, non-player squads now move, press the attack, hold defensively, and
+auto-retreat on their own inside a battle, manual save/load works end to
+end, and diplomacy (STRATEGY_DETAIL_SPECIFICATION.md section 11) now has a
+real runtime: `RelationState` (friendship, treaty type/countdown, and the
+proposal/gift/intel-purchase cooldowns and violation penalty) replaces the
+old `Faction.relations` float score, stored in
+`CampaignRuntimeState.relation_states` keyed by an unordered faction-pair —
+one instance per pair, not the per-`FactionState`-dict shape DATA_DEFINITION.md
+section 6.2 sketches, since that would require manually keeping two
+independent copies in sync on every update; this codebase already
+centralizes all other campaign-wide collections (units, squads, pilots,
+intel) the same way. `scripts/factions/diplomacy.gd` implements the full
+11.3 success-rate formula (friendship, relative faction power via a new
+`BattlePowerEstimator.faction_total_power`, treaty-length penalty, and a
+gift-offer bonus sized against `GameState.estimate_faction_income`),
+ceasefire/non-aggression proposals with a real deterministic roll
+(`GameState.campaign_rng`, persisted across save/load), treaty
+formation/expiry/notification, mutual invasion-blocking while a treaty is
+active (`GameState.plan_squad_movement`), unilateral treaty-breaking with
+its friendship and success-rate penalties, resource gifting, intel purchase
+building on the existing `IntelRecordState` machinery, and captured-unit
+ransom. A `DiplomacyPanel` (mirroring `SaveLoadPanel`'s style) exposes
+proposals, treaty-breaking, and gifting from the strategic map; intel
+purchase and ransom are backend-only for now (see the numbered list below).
+Every `Diplomacy` function takes `game_state` as an explicit first
+parameter instead of reading the `GameState` autoload by its bare
+identifier — see the "Validation and setup" section's note on the headless
+compile-order bug below, since a test exercising `Diplomacy` directly would
+otherwise be the exact trigger case. The remaining gaps, in rough order of
+value:
 
-1. Pilot skills: `PilotSkillDef.modifiers`/`condition_type`/`leader_only`
-   are validated at startup but never read during combat — learned skills
-   have no effect. This was deliberately deferred from the pilot-progression
-   pass because `res://data/pilot_skills/` is still empty (both current
-   pilots have `skill_ids = []`), so there is no real data yet to validate a
-   generic condition/modifier evaluator against. There is also no player
-   formation UI for pilot assignment yet — `assign_pilot_to_unit`/
-   `unassign_pilot` exist and are tested, but only `GameState`'s
-   transitional deterministic seeding calls them today.
-2. Persistent intel and strategic-map fog of war: fog of war only exists
-   inside a single battle right now (see the fog-of-war milestone above for
-   what's deliberately still missing — `IntelRecordState` persistence,
-   strategic-map visibility, and the intel-purchase feature).
-3. AI-vs-AI battle auto-resolution: every combat contact, including battles
-   the player has no stake in, currently requires manually playing through
-   the full RTS overlay, because `BattlePrototypeView` has no non-interactive
-   fast-resolve path and `TurnManager` awaits every battle unconditionally.
-   This will only get more disruptive as the faction count grows toward
-   three.
-4. Terrain zones and battle-map navigation: `TerrainZoneDef`/`TerrainEffect`
-   have no resource class or loader yet, `BattleMapDef.navigation_region_path`
-   is schema-only, squad movement is straight-line with no pathfinding, and
-   defending squads never move, retreat, or defend on their own inside a
-   battle (only player-issued squads reposition).
-5. Save/load: per-object `to_dict()/from_dict()` round-tripping already
-   exists and is tested for campaign/squad/unit/production/pilot state, but
-   there is no top-level `CampaignSaveData` aggregator, no file I/O, and no
-   save/load UI.
-6. Diplomacy treaties and the event system remain schema-only —
-   `TreatyType`/`RelationState`/`EventDef` have no runtime logic beyond the
-   lightweight numeric relation score (`Faction.relations`,
-   `scripts/factions/diplomacy.gd`) already driving AI attack targeting.
-7. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
+1. Terrain zones, navmesh pathfinding, and the in-round abstract
+   engagement-distance mechanic: see the battle squad movement/AI
+   milestone above for exactly what's still missing and why each piece
+   was deferred (no resource class/scene geometry, needs editor-baked
+   navigation, or is a distinct mechanic from pre-contact positioning).
+2. The event system (`EventDef`, main/sub events, dialogue UI, and a
+   condition evaluator) remains schema-only — it was explicitly scoped out
+   of the diplomacy milestone above as its own, much larger undertaking.
+3. Tech gifting (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) was
+   scoped out of the diplomacy milestone above: it needs a
+   research-candidate/tech-node system that doesn't exist yet (the current
+   `Faction.tech_tier` is still the flat five-cost-tier placeholder, not
+   the generated tech-node graph DATA_DEFINITION.md targets), so there is
+   nowhere for a gifted candidate to be registered. `Diplomacy` and
+   `RelationState` are otherwise ready for it (same gift cooldown).
+4. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
    placeholder in `GameState._apply_battle_pilot_exp` — there is no
-   `ProfileState`/achievement system to source it from yet.
+   `ProfileState`/achievement system to source it from yet. Autosave
+   (see the save/load milestone above) is in the same boat: there is no
+   `manual_save_slots`/`autosave_slots` split to drive it from yet either.
+5. `PilotSkillDef.action_skill_id` (granting an extra active support skill)
+   and a player-facing pilot-assignment UI (`assign_pilot_to_unit`/
+   `unassign_pilot` are tested but only called by `GameState`'s
+   transitional deterministic seeding today) remain unimplemented.
+6. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
+   is declared but nothing reads it, and the save schema's `difficulty_id`
+   is correspondingly omitted from the save/load milestone above).
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -463,10 +675,72 @@ at `res://data/units/` is now the only unit-definition path.
   position tracking, the firing-disclosure reveal window opening and
   expiring, and the battle view hiding/freezing unconfirmed and
   out-of-range enemy squads.
+- Run `res://tests/pilot_skills_test.gd` for unlock-level gating, leader_only
+  gating, all four `condition_type` values (`always`/`hp_pct`/`en_pct`/
+  `environment`, the latter two via synthetic pilot/skill data registered
+  and cleaned up locally), and a same-RNG-seed damage comparison proving a
+  firepower skill actually changes `BattleCombatSystem._resolve_attack`'s
+  output.
+- Run `res://tests/strategic_intel_test.gd` for a squad's own-faction
+  confirmation, colocation-based confirmation without combat, stickiness
+  after the observing squad leaves, reverting to unconfirmed on a
+  composition change, and both sides of a resolved battle confirming each
+  other.
+- Run `res://tests/ai_battle_auto_resolve_test.gd` for
+  `_battle_involves_player` classification, a non-player battle finalizing
+  synchronously through `_auto_resolve_battle` with no signal listener
+  connected, and a full `commit_turn()` cycle completing when the active
+  AI faction fights a synthetic third faction with no
+  `battle_runtime_ready` handler present at all.
+- Run `res://tests/battle_squad_movement_ai_test.gd` for headless (no view)
+  squads actually closing distance under `advance_time` alone,
+  OFFENSIVE/BALANCED squads targeting the nearest enemy, DEFENSIVE squads
+  holding their own HQ, the player's own squad destination never being
+  AI-overridden, RETREAT-policy auto-triggering at the 30% HP threshold,
+  and the `movement_ai_disabled` opt-out.
+- Run `res://tests/save_load_test.gd` for a full save/load round trip
+  (funds, materials, region ownership, and campaign_runtime state survive
+  a save, further mutation, and reload undoing that later mutation),
+  save being refused outside `Phase.ORDERS`, `list_save_slots()` matching
+  what's on disk, and loading a missing or corrupt slot failing cleanly
+  instead of crashing. Uses slots 89-91 (cleaned up after the run) to
+  avoid colliding with a real save on a developer's machine.
+- Run `res://tests/diplomacy_test.gd` for initial friendship/band, combat
+  events lowering friendship symmetrically, `tick_week`'s treaty countdown
+  (including the one-turn-before-expiry log notice) and cooldown decrements,
+  proposal validation (bad duration, cooldown, insufficient funds), a
+  deterministic successful proposal (forced `campaign_rng` seed) forming the
+  treaty, transferring the offer, and retreating a stranded squad home, a
+  deterministic failed proposal costing nothing but setting the cooldown, an
+  active treaty blocking `plan_squad_movement` into the partner's territory
+  and that block lifting on expiry, unilateral treaty-breaking penalizing
+  only the breaker's own future proposals, gift minimum/cooldown enforcement,
+  intel purchase transferring only squads the partner already confirmed (via
+  a synthetic third faction, same trick as `multi_faction_conflict_test.gd`),
+  and captured-unit ransom. See also `campaign_runtime_state_test.gd`'s
+  `_test_relation_state_round_trip` for `relation_states`/`diplomacy_log`
+  surviving a JSON save/load round trip and `get_relation_state` resolving
+  the same instance regardless of argument order.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type
   ... in the current scope" even though the class compiles fine on its own.
+- A handful of files under `scenes/strategic_map/` fail to compile with
+  "Identifier not found: GameState" if a `--script` test entry point makes
+  them the first thing directly compiled/instantiated (a headless-only
+  GDScript compile-order quirk; they work fine through the normal
+  autoload-boot path, e.g. any test that goes through `GameState`/
+  `TurnManager` first). If a new test hits this, prefer restructuring the
+  test to reach the autoload first rather than fighting the target file's
+  `GameState.` references — see `strategic_intel_test.gd`'s dropped
+  `RegionNodeView` case for what was tried. `scripts/factions/diplomacy.gd`
+  used to be on this list too; it now takes `game_state` as an explicit
+  parameter on every function instead of referencing the `GameState`
+  autoload by bare identifier, which sidesteps the bug entirely (see
+  `diplomacy_test.gd` for a test that exercises it directly, something no
+  earlier test attempted). Prefer that parameter-passing approach over the
+  restructure-the-test workaround whenever the class under test is the one
+  actually triggering the bug, rather than a bystander.
 - Godot 4.7.1 is installed at
   `C:/Users/koyu9/local/godot/Godot_v4.7.1-stable_win64_console.exe` (not on
   PATH). All state/production tests, the strategic-map smoke test, and a

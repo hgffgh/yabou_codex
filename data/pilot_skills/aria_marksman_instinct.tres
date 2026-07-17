@@ -1,0 +1,17 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/pilot_skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"aria_marksman_instinct"
+display_name_key = &"pilot_skill.aria_marksman_instinct.name"
+description_key = &"pilot_skill.aria_marksman_instinct.description"
+unlock_level = 1
+leader_only = false
+condition_type = &"always"
+condition_value = 0.0
+modifiers = {
+&"accuracy": 10.0
+}
+action_skill_id = &""

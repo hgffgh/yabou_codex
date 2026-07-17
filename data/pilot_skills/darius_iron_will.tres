@@ -1,0 +1,17 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/pilot_skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"darius_iron_will"
+display_name_key = &"pilot_skill.darius_iron_will.name"
+description_key = &"pilot_skill.darius_iron_will.description"
+unlock_level = 1
+leader_only = false
+condition_type = &"always"
+condition_value = 0.0
+modifiers = {
+&"armor": 15.0
+}
+action_skill_id = &""

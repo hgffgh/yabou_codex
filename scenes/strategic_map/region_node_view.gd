@@ -88,11 +88,22 @@ func set_selected(selected: bool) -> void:
 ## Badge showing the dominant unit type stationed here (by count) plus a
 ## total count, so the player can see WHAT is garrisoned where, not just
 ## THAT something is — a plain number badge didn't answer "which unit?"
+## COMBAT_DETAIL_SPECIFICATION.md section 24: an unconfirmed hostile squad
+## must not reveal its composition, so it is excluded from the known-count
+## tally and instead flips the badge to a "?" placeholder — showing exact
+## numbers alongside an unknown presence would misleadingly imply the
+## total is fully known.
 func update_squad_badge() -> void:
 	var total := 0
 	var dominant_id: StringName = &""
 	var counts_by_unit_def_id: Dictionary = {}
+	var has_unknown_contact := false
 	for squad: SquadState in GameState.campaign_runtime.get_squads_in_region(region_id):
+		var known := squad.owner_faction_id == GameState.player_faction_id or GameState.campaign_runtime.is_squad_confirmed(GameState.player_faction_id, squad.squad_id)
+		if not known:
+			if not squad.unit_instance_ids.is_empty():
+				has_unknown_contact = true
+			continue
 		for unit_instance_id: StringName in squad.unit_instance_ids:
 			var unit := GameState.campaign_runtime.get_unit(unit_instance_id) as UnitInstanceState
 			if unit == null:
@@ -109,7 +120,11 @@ func update_squad_badge() -> void:
 			dominant_count = count
 			dominant_id = unit_def_id
 
-	if total <= 0:
+	if has_unknown_contact:
+		_badge_icon.visible = false
+		_badge_count_label.visible = true
+		_badge_count_label.text = "?"
+	elif total <= 0:
 		_badge_icon.visible = false
 		_badge_count_label.visible = false
 	else:

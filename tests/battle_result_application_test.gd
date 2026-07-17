@@ -145,13 +145,12 @@ func _test_turn_manager_applies_diplomacy_penalty() -> void:
 		"diplomacy attack penalty was not applied after the battle resolved (before=%s after=%s)" % [relation_before, relation_after])
 
 
-## Reads Faction.relations directly instead of calling the Diplomacy utility
+## Reads the RelationState directly instead of calling the Diplomacy utility
 ## class by name, since --script test entry points can hit a compile-order
 ## issue where a directly-referenced static-only class fails to resolve the
 ## GameState autoload identifier.
 func _relation(faction_id: StringName, other_id: StringName) -> float:
-	var faction: Faction = game_state.get_faction(faction_id)
-	return faction.relations.get(other_id, 0.0) if faction != null else 0.0
+	return game_state.campaign_runtime.get_relation_state(faction_id, other_id).friendship
 
 
 ## Forces the attacker side to win by destroying every defender unit, so any

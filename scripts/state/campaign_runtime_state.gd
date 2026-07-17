@@ -10,6 +10,9 @@ const PRODUCTION_JOB_ID_PREFIX := "production_job_"
 var units_by_id: Dictionary = {}
 var squads_by_id: Dictionary = {}
 var pilots_by_id: Dictionary = {}
+var intel_records_by_key: Dictionary = {}  # "observer_faction_id|target_squad_id" -> IntelRecordState
+var relation_states: Dictionary = {}  # sorted "faction_id|faction_id" -> RelationState
+var diplomacy_log: Array = []  # Array[Dictionary], DiplomacyLogEntry-shaped (DATA_DEFINITION.md 18.2)
 var production_jobs_by_id: Dictionary = {}
 var production_queues_by_facility_id: Dictionary = {}
 var next_unit_serial: int = 1
@@ -21,6 +24,9 @@ func reset() -> void:
 	units_by_id.clear()
 	squads_by_id.clear()
 	pilots_by_id.clear()
+	intel_records_by_key.clear()
+	relation_states.clear()
+	diplomacy_log.clear()
 	production_jobs_by_id.clear()
 	production_queues_by_facility_id.clear()
 	next_unit_serial = 1
@@ -217,6 +223,93 @@ func _repair_squad_leader_for_unit(unit: UnitInstanceState) -> void:
 	var squad := get_squad(unit.squad_id)
 	if squad != null:
 		_repair_squad_leader(squad)
+
+
+static func _intel_key(observer_faction_id: StringName, target_squad_id: StringName) -> String:
+	return "%s|%s" % [observer_faction_id, target_squad_id]
+
+
+func get_intel_record(observer_faction_id: StringName, target_squad_id: StringName) -> IntelRecordState:
+	return intel_records_by_key.get(_intel_key(observer_faction_id, target_squad_id)) as IntelRecordState
+
+
+## DATA_DEFINITION.md section 21: a stored CONFIRMED record only counts if
+## its target_revision still matches the squad's current intel_revision --
+## STRATEGY_DETAIL_SPECIFICATION.md section 6 reverts a reorganized squad
+## to unconfirmed. A faction's own squads are always implicitly confirmed
+## to itself without needing a record.
+func is_squad_confirmed(observer_faction_id: StringName, target_squad_id: StringName) -> bool:
+	var squad := get_squad(target_squad_id)
+	if squad == null:
+		return false
+	if squad.owner_faction_id == observer_faction_id:
+		return true
+	var record := get_intel_record(observer_faction_id, target_squad_id)
+	return record != null and record.intel_state == GameEnums.IntelState.CONFIRMED and record.target_revision == squad.intel_revision
+
+
+## Sticky for as long as the squad's composition doesn't change: combat
+## contact or same-region co-location call this to mark a hostile squad
+## confirmed, snapshotting its current intel_revision so a later
+## reorganization is detected as staleness by is_squad_confirmed.
+func confirm_squad_intel(observer_faction_id: StringName, target_squad_id: StringName, turn_number: int) -> void:
+	var squad := get_squad(target_squad_id)
+	if squad == null or squad.owner_faction_id == observer_faction_id:
+		return
+	var key := _intel_key(observer_faction_id, target_squad_id)
+	var record := intel_records_by_key.get(key) as IntelRecordState
+	if record == null:
+		record = IntelRecordState.new()
+		record.observer_faction_id = observer_faction_id
+		record.target_squad_id = target_squad_id
+		intel_records_by_key[key] = record
+	record.intel_state = GameEnums.IntelState.CONFIRMED
+	record.target_revision = squad.intel_revision
+	record.last_seen_turn = turn_number
+
+
+static func _relation_key(a: StringName, b: StringName) -> String:
+	var first := String(a)
+	var second := String(b)
+	return "%s|%s" % [first, second] if first <= second else "%s|%s" % [second, first]
+
+
+## The same RelationState instance is returned regardless of argument order,
+## so friendship/treaty updates from either faction's perspective stay
+## symmetric per DATA_DEFINITION.md section 18.1 without extra bookkeeping.
+func get_relation_state(a: StringName, b: StringName, create_if_missing: bool = true) -> RelationState:
+	var key := _relation_key(a, b)
+	var relation := relation_states.get(key) as RelationState
+	if relation == null and create_if_missing:
+		relation = RelationState.new(a, b)
+		relation_states[key] = relation
+	return relation
+
+
+## Seeds every distinct faction pair at the fixed -50 initial friendship
+## (STRATEGY_DETAIL_SPECIFICATION.md section 11.1). Called once at campaign
+## start; get_relation_state's create-on-demand path covers any pair this
+## somehow misses.
+func ensure_relation_states(faction_ids: Array) -> void:
+	var sorted_ids := faction_ids.duplicate()
+	sorted_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for i in range(sorted_ids.size()):
+		for j in range(i + 1, sorted_ids.size()):
+			get_relation_state(sorted_ids[i], sorted_ids[j])
+
+
+func log_diplomacy(
+	turn: int, actor_faction_id: StringName, target_faction_id: StringName,
+	action_type: StringName, payload: Dictionary, success: bool,
+) -> void:
+	diplomacy_log.append({
+		"turn": turn,
+		"actor_faction_id": actor_faction_id,
+		"target_faction_id": target_faction_id,
+		"action_type": action_type,
+		"payload": payload.duplicate(),
+		"success": success,
+	})
 
 
 func remove_unassigned_unit(instance_id: StringName) -> bool:
@@ -537,6 +630,40 @@ func validate(
 		var owning_pilot := pilots_by_id.get(pilot_owner.pilot_id) as PilotState
 		if owning_pilot == null or owning_pilot.assigned_unit_instance_id != pilot_owner.instance_id:
 			errors.append("units[%s]: pilot_id '%s' does not resolve to a matching PilotState" % [unit_key, pilot_owner.pilot_id])
+		for intel_key: Variant in intel_records_by_key:
+			var record := intel_records_by_key[intel_key] as IntelRecordState
+			if record == null or _intel_key(record.observer_faction_id, record.target_squad_id) != intel_key:
+				errors.append("campaign.intel_records: invalid record '%s'" % intel_key)
+				continue
+			if record.observer_faction_id.is_empty() or not registry.factions.has(record.observer_faction_id):
+				errors.append("campaign.intel_records[%s]: observer_faction_id does not resolve" % intel_key)
+			if not squads_by_id.has(record.target_squad_id):
+				errors.append("campaign.intel_records[%s]: target_squad_id does not resolve" % intel_key)
+			elif (squads_by_id[record.target_squad_id] as SquadState).owner_faction_id == record.observer_faction_id:
+				errors.append("campaign.intel_records[%s]: a faction cannot hold an intel record on its own squad" % intel_key)
+			if record.intel_state < GameEnums.IntelState.UNKNOWN or record.intel_state > GameEnums.IntelState.CONFIRMED:
+				errors.append("campaign.intel_records[%s]: intel_state is outside IntelState" % intel_key)
+			if record.target_revision < 0:
+				errors.append("campaign.intel_records[%s]: target_revision must not be negative" % intel_key)
+	for relation_key: Variant in relation_states:
+		var relation := relation_states[relation_key] as RelationState
+		if relation == null or _relation_key(relation.faction_a_id, relation.faction_b_id) != relation_key:
+			errors.append("campaign.relation_states: invalid relation '%s'" % relation_key)
+			continue
+		if relation.faction_a_id == relation.faction_b_id or not registry.factions.has(relation.faction_a_id) or not registry.factions.has(relation.faction_b_id):
+			errors.append("campaign.relation_states[%s]: faction ids do not resolve to a distinct pair" % relation_key)
+		if relation.friendship < GameConstants.FRIENDSHIP_MIN or relation.friendship > GameConstants.FRIENDSHIP_MAX:
+			errors.append("campaign.relation_states[%s]: friendship is outside its valid range" % relation_key)
+		if relation.treaty_type < GameEnums.TreatyType.NONE or relation.treaty_type > GameEnums.TreatyType.NON_AGGRESSION:
+			errors.append("campaign.relation_states[%s]: treaty_type is outside TreatyType" % relation_key)
+		if relation.treaty_turns_remaining < 0:
+			errors.append("campaign.relation_states[%s]: treaty_turns_remaining must not be negative" % relation_key)
+		if relation.proposal_cooldown_turns < 0 or relation.gift_cooldown_turns < 0 or relation.intel_purchase_cooldown_turns < 0:
+			errors.append("campaign.relation_states[%s]: cooldown counters must not be negative" % relation_key)
+		if relation.violation_penalty_turns < 0:
+			errors.append("campaign.relation_states[%s]: violation_penalty_turns must not be negative" % relation_key)
+		if not relation.violator_faction_id.is_empty() and relation.violator_faction_id != relation.faction_a_id and relation.violator_faction_id != relation.faction_b_id:
+			errors.append("campaign.relation_states[%s]: violator_faction_id must be empty or one of the pair" % relation_key)
 	var queued_jobs := {}
 	for facility_key: Variant in production_queues_by_facility_id:
 		var queue := production_queues_by_facility_id[facility_key] as ProductionQueueState
@@ -633,6 +760,18 @@ func to_dict() -> Dictionary:
 		var pilot := pilots_by_id[key] as PilotState
 		if pilot != null:
 			pilot_states.append(pilot.to_dict())
+	var intel_records: Array[Dictionary] = []
+	var intel_keys := intel_records_by_key.keys()
+	intel_keys.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for key: Variant in intel_keys:
+		var record := intel_records_by_key[key] as IntelRecordState
+		if record != null:
+			intel_records.append(record.to_dict())
+	var relation_state_dicts: Array[Dictionary] = []
+	for key: Variant in _sorted_keys(relation_states):
+		var relation := relation_states[key] as RelationState
+		if relation != null:
+			relation_state_dicts.append(relation.to_dict())
 	var production_jobs: Array[Dictionary] = []
 	for key: Variant in _sorted_keys(production_jobs_by_id):
 		var job := production_jobs_by_id[key] as ProductionJobState
@@ -650,6 +789,9 @@ func to_dict() -> Dictionary:
 		"unit_states": unit_states,
 		"squad_states": squad_states,
 		"pilot_states": pilot_states,
+		"intel_records": intel_records,
+		"relation_states": relation_state_dicts,
+		"diplomacy_log": diplomacy_log.duplicate(true),
 		"production_jobs": production_jobs,
 		"production_queues": production_queues,
 	}
@@ -705,6 +847,61 @@ static func from_dict(data: Dictionary) -> Dictionary:
 				state.pilots_by_id[pilot.pilot_id] = pilot
 	else:
 		errors.append("campaign.pilot_states must be an Array")
+
+	var intel_values: Variant = data.get("intel_records", [])
+	if intel_values is Array:
+		for value: Variant in intel_values:
+			if not value is Dictionary:
+				errors.append("campaign.intel_records: entry must be a Dictionary")
+				continue
+			var record := IntelRecordState.from_dict(value)
+			if record.observer_faction_id.is_empty() or record.target_squad_id.is_empty():
+				errors.append("campaign.intel_records: observer_faction_id and target_squad_id must not be empty")
+				continue
+			var key := _intel_key(record.observer_faction_id, record.target_squad_id)
+			if state.intel_records_by_key.has(key):
+				errors.append("campaign.intel_records: duplicate record for '%s'" % key)
+			else:
+				state.intel_records_by_key[key] = record
+	else:
+		errors.append("campaign.intel_records must be an Array")
+
+	var relation_values: Variant = data.get("relation_states", [])
+	if relation_values is Array:
+		for value: Variant in relation_values:
+			if not value is Dictionary:
+				errors.append("campaign.relation_states: entry must be a Dictionary")
+				continue
+			var relation := RelationState.from_dict(value)
+			if relation.faction_a_id.is_empty() or relation.faction_b_id.is_empty() or relation.faction_a_id == relation.faction_b_id:
+				errors.append("campaign.relation_states: faction_a_id and faction_b_id must be distinct and non-empty")
+				continue
+			var relation_key := _relation_key(relation.faction_a_id, relation.faction_b_id)
+			if state.relation_states.has(relation_key):
+				errors.append("campaign.relation_states: duplicate relation for '%s'" % relation_key)
+			else:
+				state.relation_states[relation_key] = relation
+	else:
+		errors.append("campaign.relation_states must be an Array")
+
+	var diplomacy_log_values: Variant = data.get("diplomacy_log", [])
+	if diplomacy_log_values is Array:
+		for value: Variant in diplomacy_log_values as Array:
+			if not value is Dictionary:
+				errors.append("campaign.diplomacy_log: entry must be a Dictionary")
+				continue
+			var entry := value as Dictionary
+			var payload_value: Variant = entry.get("payload", {})
+			state.diplomacy_log.append({
+				"turn": int(entry.get("turn", 0)),
+				"actor_faction_id": StringName(entry.get("actor_faction_id", "")),
+				"target_faction_id": StringName(entry.get("target_faction_id", "")),
+				"action_type": StringName(entry.get("action_type", "")),
+				"payload": (payload_value as Dictionary).duplicate(true) if payload_value is Dictionary else {},
+				"success": bool(entry.get("success", false)),
+			})
+	else:
+		errors.append("campaign.diplomacy_log must be an Array")
 
 	var job_values: Variant = data.get("production_jobs", [])
 	if job_values is Array:

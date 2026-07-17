@@ -289,6 +289,18 @@ func _build_ui_overlay() -> void:
 	_development_button.pressed.connect(_on_development_pressed)
 	top_bar.add_child(_development_button)
 
+	var diplomacy_button := Button.new()
+	diplomacy_button.text = "外交"
+	diplomacy_button.custom_minimum_size = Vector2(90, 40)
+	diplomacy_button.pressed.connect(_on_diplomacy_pressed)
+	top_bar.add_child(diplomacy_button)
+
+	var save_load_button := Button.new()
+	save_load_button.text = "セーブ/ロード"
+	save_load_button.custom_minimum_size = Vector2(120, 40)
+	save_load_button.pressed.connect(_on_save_load_pressed)
+	top_bar.add_child(save_load_button)
+
 	_end_turn_button = Button.new()
 	_end_turn_button.text = "行動終了"
 	_end_turn_button.custom_minimum_size = Vector2(120, 40)
@@ -638,6 +650,16 @@ func _on_development_pressed() -> void:
 	if GameState.is_game_over or TurnManager.is_resolving_turn or TurnManager.active_faction_id != GameState.player_faction_id or TurnManager.current_phase != TurnManager.Phase.ORDERS:
 		return
 	var panel := DevelopmentPanel.new()
+	add_child(panel)
+	panel.setup(GameState.player_faction_id)
+
+func _on_save_load_pressed() -> void:
+	var panel := SaveLoadPanel.new()
+	add_child(panel)
+	panel.setup()
+
+func _on_diplomacy_pressed() -> void:
+	var panel := DiplomacyPanel.new()
 	add_child(panel)
 	panel.setup(GameState.player_faction_id)
 

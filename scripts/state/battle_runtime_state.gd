@@ -23,12 +23,22 @@ var rng_state: int = 0
 var unit_defs: Dictionary = {}
 var weapon_defs: Dictionary = {}
 var pilot_defs: Dictionary = {}
+var pilot_skill_defs: Dictionary = {}
 var support_skill_defs: Dictionary = {}
+## From BattleMapDef.environment; used by PilotSkillDef's "environment"
+## condition_type. Defaults to the BattleMapDef field's own default so a
+## battle built without a battle_map still resolves to something valid.
+var environment: GameEnums.EnvironmentType = GameEnums.EnvironmentType.SPACE
 var combat_events: Array[Dictionary] = []
 var engagements_by_squad_id: Dictionary = {}
 var require_round_confirmation: bool = false
 var result: BattleResultState
 var applied_to_campaign: bool = false
+## Snapshotted from GameState.player_faction_id at creation so AI squad
+## orders never override a human-controlled squad's manually-set
+## destination, without this pure simulation state needing a live
+## dependency on the GameState autoload.
+var player_faction_id: StringName = &""
 
 func request_retreat(squad_id: StringName) -> bool:
 	var squad := squad_states_by_id.get(squad_id) as BattleSquadState
@@ -44,6 +54,8 @@ func advance_time(delta_sec: float) -> void:
 	var applied := delta_sec * time_scale
 	var had_engagement := not engagements_by_squad_id.is_empty()
 	elapsed_world_sec = minf(MAX_WORLD_SEC, elapsed_world_sec + applied)
+	_advance_ai_squad_orders()
+	_advance_squad_movement(applied)
 	for squad: BattleSquadState in squad_states_by_id.values():
 		if squad.retreat_requested:
 			squad.retreat_prepare_sec = minf(RETREAT_PREPARE_SEC, squad.retreat_prepare_sec + applied)
@@ -65,6 +77,93 @@ func advance_time(delta_sec: float) -> void:
 		return
 	if elapsed_world_sec >= MAX_WORLD_SEC:
 		finalize(defender_faction_id, attacker_faction_id, &"timeout")
+
+## UNIT_DETAIL/COMBAT_DETAIL_SPECIFICATION.md section 25: battlefield move
+## speed is unit speed / 10 m/s, using the slowest surviving unit.
+func _squad_speed(squad: BattleSquadState) -> float:
+	var slowest := INF
+	for unit_id: StringName in squad.unit_instance_ids:
+		var unit := unit_states_by_id[unit_id] as BattleUnitState
+		if unit.current_hp <= 0:
+			continue
+		var unit_def := unit_defs.get(unit.unit_def_id) as UnitDef
+		if unit_def != null:
+			slowest = minf(slowest, float(unit_def.speed) / 10.0)
+	return slowest if slowest < INF else 0.0
+
+## Moved here from BattlePrototypeView so destination-seeking movement also
+## runs for auto-resolved battles that have no view driving _process every
+## frame -- previously such battles never moved a single squad and could
+## only ever fight if the map's spawn points happened to already be in
+## weapon range of each other. Movement freezes globally while any pair is
+## engaged (COMBAT_DETAIL_SPECIFICATION.md section 26's in-round approach/
+## withdrawal rates operate on a separate abstract distance decoupled from
+## world_position and are not modeled here), during retreat prep, and
+## during the post-round re-engagement wait -- unchanged from the original
+## view logic.
+func _advance_squad_movement(applied_sec: float) -> void:
+	if not engagements_by_squad_id.is_empty():
+		return
+	for squad: BattleSquadState in squad_states_by_id.values():
+		if squad.retreat_requested or squad.reengage_wait_sec > 0.0:
+			continue
+		var offset := squad.destination - squad.world_position
+		if offset.length() <= 1.0:
+			continue
+		squad.world_position += offset.normalized() * minf(offset.length(), _squad_speed(squad) * applied_sec)
+		squad.world_position.x = clampf(squad.world_position.x, -580.0, 580.0)
+		squad.world_position.y = clampf(squad.world_position.y, -430.0, 430.0)
+
+## Closes the "defending squads never move, retreat, or defend on their
+## own" gap: any squad not under the human player's direct control picks
+## its own destination every tick. OFFENSIVE/BALANCED squads press toward
+## the nearest living enemy squad; DEFENSIVE/SUPPORT/RETREAT squads hold
+## near their own HQ instead of charging out (they still fight normally if
+## the enemy comes to them -- engagement triggers on weapon-range contact
+## independent of this). RETREAT-policy squads also auto-request retreat
+## once squad HP drops to 30% or below, per STRATEGY_DETAIL_SPECIFICATION.md's
+## policy table -- policy selection itself is the trigger, not manual play,
+## so this applies regardless of who controls the squad.
+func _advance_ai_squad_orders() -> void:
+	for squad: BattleSquadState in squad_states_by_id.values():
+		if not _squad_has_living_units(squad):
+			continue
+		if squad.policy == GameEnums.BattlePolicy.RETREAT and not squad.retreat_requested and _squad_hp_ratio(squad) <= 0.3:
+			request_retreat(squad.squad_id)
+		if squad.faction_id == player_faction_id or squad.movement_ai_disabled or squad.retreat_requested or is_squad_engaged(squad.squad_id):
+			continue
+		match squad.policy:
+			GameEnums.BattlePolicy.OFFENSIVE, GameEnums.BattlePolicy.BALANCED:
+				var nearest := _nearest_living_enemy_squad(squad)
+				squad.destination = nearest.world_position if nearest != null else _own_hq_position(squad.faction_id)
+			_:
+				squad.destination = _own_hq_position(squad.faction_id)
+
+func _squad_hp_ratio(squad: BattleSquadState) -> float:
+	var current := 0
+	var maximum := 0
+	for unit_id: StringName in squad.unit_instance_ids:
+		var unit := unit_states_by_id[unit_id] as BattleUnitState
+		current += maxi(0, unit.current_hp)
+		maximum += unit.max_hp
+	return float(current) / float(maxi(1, maximum))
+
+func _nearest_living_enemy_squad(squad: BattleSquadState) -> BattleSquadState:
+	var best: BattleSquadState = null
+	var best_distance := INF
+	for other: BattleSquadState in squad_states_by_id.values():
+		if other.faction_id == squad.faction_id or not _squad_has_living_units(other):
+			continue
+		var distance := Vector2(squad.world_position.x, squad.world_position.y).distance_to(Vector2(other.world_position.x, other.world_position.y))
+		if distance < best_distance:
+			best_distance = distance
+			best = other
+	return best
+
+func _own_hq_position(faction_id: StringName) -> Vector3:
+	var hq_id := attacker_hq_id if faction_id == attacker_faction_id else defender_hq_id
+	var point_def := control_point_defs_by_id.get(hq_id) as BattleControlPointDef
+	return point_def.position if point_def != null else Vector3.ZERO
 
 func is_squad_engaged(squad_id: StringName) -> bool:
 	return engagements_by_squad_id.has(squad_id)

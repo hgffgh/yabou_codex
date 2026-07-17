@@ -1,0 +1,18 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/pilot_skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"aria_last_stand"
+display_name_key = &"pilot_skill.aria_last_stand.name"
+description_key = &"pilot_skill.aria_last_stand.description"
+unlock_level = 10
+leader_only = false
+condition_type = &"hp_pct"
+condition_value = 0.3
+modifiers = {
+&"firepower": 30.0,
+&"critical": 10.0
+}
+action_skill_id = &""

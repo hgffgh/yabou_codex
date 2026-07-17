@@ -304,13 +304,10 @@ func _process(delta: float) -> void:
 		return
 	if not battle_started:
 		return
-	var scaled_delta := delta * battle.time_scale
+	# Position movement itself now lives in BattleRuntimeState.advance_time
+	# (so auto-resolved battles move too); this just mirrors the resulting
+	# position onto each squad's visual every frame.
 	for squad: BattleSquadState in battle.squad_states_by_id.values():
-		var offset := squad.destination - squad.world_position
-		if offset.length() > 1.0 and not squad.retreat_requested and battle.engagements_by_squad_id.is_empty() and squad.reengage_wait_sec <= 0.0:
-			squad.world_position += offset.normalized() * minf(offset.length(), _squad_speed(squad) * scaled_delta)
-		squad.world_position.x = clampf(squad.world_position.x, -580.0, 580.0)
-		squad.world_position.y = clampf(squad.world_position.y, -430.0, 430.0)
 		_sync_intel_visibility(squad)
 	battle.advance_time(delta)
 	_sync_combat_events()
@@ -469,16 +466,6 @@ func _advance_transient_effects(delta: float) -> void:
 			transient_effects.remove_at(index)
 		else:
 			transient_effects[index] = effect
-
-func _squad_speed(squad: BattleSquadState) -> float:
-	var slowest: float = INF
-	for unit_id: StringName in squad.unit_instance_ids:
-		var battle_unit := battle.unit_states_by_id[unit_id] as BattleUnitState
-		if battle_unit.current_hp <= 0: continue
-		var campaign_unit: UnitInstanceState = game_state.campaign_runtime.get_unit(unit_id)
-		var unit_def := game_state.master_data.units.get(campaign_unit.unit_def_id) as UnitDef
-		slowest = minf(slowest, float(unit_def.speed) / 10.0)
-	return slowest if slowest < INF else 0.0
 
 func _on_arena_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton or not event.pressed or camera == null:
