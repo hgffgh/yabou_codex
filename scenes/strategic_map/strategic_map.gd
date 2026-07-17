@@ -446,27 +446,34 @@ func _update_info_panel() -> void:
 
 	var player_faction: Faction = GameState.get_faction(GameState.player_faction_id)
 	_production_option.clear()
+	var has_unlocked_option := false
 	for uid in GameState.master_data.units:
 		var udef: UnitDef = GameState.master_data.units[uid]
 		if udef.faction_origin_id != player_faction.def.id:
 			continue
-		var label := "%s（資金%d・物資%d）" % [
+		var unlocked := TechUnlock.is_unit_unlocked(player_faction, uid, GameState.master_data)
+		var label := "%s（資金%d・物資%d）%s" % [
 			tr(String(udef.display_name_key)),
 			GameConstants.UNIT_PRODUCTION_FUNDS[udef.size],
 			GameConstants.UNIT_PRODUCTION_MATERIALS[udef.size],
+			"" if unlocked else "── 未解禁",
 		]
 		if udef.icon:
 			_production_option.add_icon_item(udef.icon, label)
 		else:
 			_production_option.add_item(label)
 		_production_option.set_item_metadata(_production_option.item_count - 1, uid)
+		if unlocked:
+			has_unlocked_option = true
+		else:
+			_production_option.set_item_disabled(_production_option.item_count - 1, true)
 	var facility_ids := GameState.production_facility_ids_for_region(region.def.id)
 	var queue_size := 0
 	if not facility_ids.is_empty():
 		var production_queue := GameState.campaign_runtime.production_queues_by_facility_id.get(facility_ids[0]) as ProductionQueueState
 		queue_size = production_queue.job_ids.size() if production_queue != null else 0
 	var queue_full := queue_size >= MAX_PLAYER_QUEUE_LENGTH
-	var can_produce := is_player_owned and orders_open and not queue_full and not facility_ids.is_empty() and _production_option.item_count > 0
+	var can_produce := is_player_owned and orders_open and not queue_full and not facility_ids.is_empty() and has_unlocked_option
 	_production_option.disabled = not can_produce
 	_produce_button.disabled = not can_produce
 	_production_queue_label.text = _build_queue_text(region)

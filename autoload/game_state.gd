@@ -999,6 +999,8 @@ func queue_production(faction_id: StringName, facility_id: StringName, unit_def_
 		errors.append("production: facility is not a production facility")
 	if unit_def == null:
 		errors.append("production: unit_def_id '%s' does not resolve" % unit_def_id)
+	elif faction != null and not TechUnlock.is_unit_unlocked(faction, unit_def_id, master_data):
+		errors.append("production: unit_def_id '%s' has not been unlocked by research yet" % unit_def_id)
 	if not errors.is_empty():
 		return {"job": null, "errors": errors}
 	var funds_cost: int = GameConstants.UNIT_PRODUCTION_FUNDS[unit_def.size]

@@ -71,13 +71,15 @@ static func _decide_production(faction: Faction, region: Region, profile: AiProf
 		GameState.queue_production(faction.def.id, facility_id, best.id)
 
 ## Picks the strongest (attack+defense) unit the faction can both afford
-## and has researched, not just the cheapest — otherwise researching
-## higher tiers would never actually change what the AI builds.
+## and has unlocked via TechUnlock, not just the cheapest — otherwise
+## researching higher tiers would never actually change what the AI builds.
 static func _best_affordable_unit(faction: Faction) -> UnitDef:
 	var best: UnitDef = null
 	var best_power := -1
 	for unit_type: UnitDef in GameState.master_data.units.values():
 		if unit_type.faction_origin_id != faction.def.id:
+			continue
+		if not TechUnlock.is_unit_unlocked(faction, unit_type.id, GameState.master_data):
 			continue
 		var funds_cost: int = GameConstants.UNIT_PRODUCTION_FUNDS[unit_type.size]
 		var materials_cost: int = GameConstants.UNIT_PRODUCTION_MATERIALS[unit_type.size]

@@ -50,6 +50,25 @@ func _test_registration_completion_and_no_dual_write() -> void:
 func _test_facility_loss_clears_without_refund() -> void:
 	var faction: Faction = _game_state.get_faction(&"nova_republic")
 	var facility_id := &"nova_shipyard_production"
+	# nova_vanguard (production power 200) is deliberately used over
+	# nova_scout (100) so a single advance_region_production call below
+	# leaves the job partially complete instead of instantly rolling it
+	# out -- but it also now requires nova_hull_foundation to be researched
+	# first (TechUnlock.is_unit_unlocked). nova_hull_foundation is
+	# mandatory_base_tech, so TechTreeGenerator always placed it in nova's
+	# generated tree at new-game time; mark it researched directly rather
+	# than driving a full TurnManager research cycle, which this file
+	# doesn't otherwise use at all.
+	var hull_node: GeneratedTechNodeState = null
+	for node_id: Variant in faction.generated_tech_nodes:
+		var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
+		if node.tech_id == &"nova_hull_foundation":
+			hull_node = node
+			break
+	_check(hull_node != null, "setup: nova_hull_foundation should always be in nova's generated tree")
+	if hull_node != null:
+		hull_node.researched = true
+
 	var funds_before := faction.funds
 	var materials_before := faction.materials
 	var queued: Dictionary = _game_state.queue_production(

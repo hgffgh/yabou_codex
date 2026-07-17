@@ -865,6 +865,71 @@ are now closed:
     remain fine as-is since nothing outside their own files touches
     `achievement_ids`/`viewed_event_ids`/`unlocked_tech_candidate_ids`.
 
+Tech-gated production (DATA_DEFINITION.md section 15's `TechDef.
+unlocks_unit_ids`) is wired up: previously schema-only, declared but never
+read anywhere, so every unit was always producible regardless of research
+state, leaving the entire tech tree/permanent-pool/encyclopedia stack with
+no actual effect on strategic gameplay.
+
+- New `TechUnlock.is_unit_unlocked(faction, unit_def_id, registry)`: a
+  unit_def_id not referenced by *any* TechDef's `unlocks_unit_ids` is
+  unrestricted (the field is an opt-in restriction on specific content, not
+  a requirement to cover every unit); one that is referenced requires the
+  faction to have researched at least one tech listing it (an "any"
+  gating rule, same permissiveness `TurnManager._node_prerequisites_met`
+  already uses for a gifted node's tier prerequisite — DATA_DEFINITION.md
+  doesn't specify "exactly one" vs "any" gating tech, so this is a scope
+  decision made here). `TechUnlock.is_skill_unlocked` also exists (for
+  `unlocks_skill_ids`) but nothing calls it yet — gating a support skill's
+  live battle usability is a distinct, more invasive change from
+  production gating, since `UnitDef.support_skill_ids`/`PilotSkillDef.
+  action_skill_id` are fixed per-unit/pilot data with no player-facing
+  loadout selection to hook a check into; it would need a researched-tech
+  snapshot threaded through `BattleRuntimeFactory`/`BattleCombatSystem`'s
+  support-candidate gathering instead. Deferred, not attempted here.
+- Wired into `GameState.queue_production` (a new rejection branch,
+  returned the same way as an unresolved unit_def_id/insufficient funds)
+  and `AiController._best_affordable_unit` (skips a locked candidate
+  entirely rather than erroring, so the AI just falls back to whatever it
+  *can* build) — the doc comment above `_best_affordable_unit` already
+  claimed to do this ("not just the cheapest — otherwise researching
+  higher tiers would never actually change what the AI builds"), an
+  aspirational leftover from before any tech-unlock system existed; it's
+  accurate now.
+- `StrategicMap`'s production `OptionButton` now marks a locked unit
+  "── 未解禁" and `set_item_disabled`s it (Godot 4 `OptionButton` supports
+  per-item disabling) instead of only failing after the player picks it and
+  presses 生産 — `_on_produce_pressed` already logged `queue_production`'s
+  error either way, but disabling the option upfront is the better default
+  UX. `can_produce`'s gate changed from "the dropdown has any item at all"
+  to "the dropdown has any *unlocked* item," so the 生産 button itself also
+  disables if every option a faction could ever build happens to be locked
+  (not reachable with the current 2-unit-per-faction sample dataset, where
+  nova_scout/crimson_bastion both stay permanently unrestricted, but a
+  correctness fix regardless of whether today's content can trigger it).
+- Sample data: `nova_hull_foundation` (nova's mandatory base tech) now sets
+  `unlocks_unit_ids = [nova_vanguard]` — nova_scout stays unrestricted as
+  the always-available starter. `crimson_bastion` (crimson_empire's *only*
+  unit) is deliberately left ungated: gating a faction's sole buildable
+  unit behind research it hasn't completed yet at campaign start would
+  leave it unable to produce anything at all until research finishes, a
+  real balance regression the tiny two-unit-per-faction dataset can't
+  currently absorb symmetrically. This is a content-scope decision, not a
+  system limitation — `TechUnlock` itself doesn't care which unit a tech
+  gates.
+- Found and fixed a real test-fixture assumption `production_integration_
+  test.gd`'s existing `_test_facility_loss_clears_without_refund` broke:
+  it queued `nova_vanguard` specifically (200 production power, over a
+  standard facility's 100/turn) so a single `advance_region_production`
+  call would leave the job *partially* complete rather than instantly
+  rolling it out, which the test needs to then verify facility loss clears
+  an in-progress job without a refund. `nova_vanguard` being newly gated
+  meant the job registration itself started failing; fixed by marking the
+  always-present `nova_hull_foundation` node researched directly (this file
+  has no `TurnManager` instance to drive a real research cycle through) --
+  a straightforward extra setup step, not a sign the original test design
+  was wrong.
+
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
 issues player movement orders by squad ID, and the movement phase applies all
@@ -1291,6 +1356,15 @@ at `res://data/units/` is now the only unit-definition path.
   own snapshot/restore setup — see the encyclopedia milestone paragraph
   above for why the snapshot alone isn't sufficient here, unlike every
   other profile-touching test in this suite.
+- Run `res://tests/tech_unlock_test.gd` for `TechUnlock.is_unit_unlocked`
+  (an unreferenced unit always unlocked, a gated one locked before and
+  unlocked after its tech is researched), `GameState.queue_production`
+  rejecting/accepting a gated unit accordingly, and
+  `AiController._best_affordable_unit` skipping a locked candidate in favor
+  of a still-unlocked one when choosing what an AI faction builds. Calls
+  `turn_manager.call("_run_ai_orders")` rather than the bare `AiController`
+  identifier, matching `ai_squad_movement_test.gd`/`ai_profile_test.gd`'s
+  already-established compile-order-bug workaround.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

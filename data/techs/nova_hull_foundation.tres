@@ -10,5 +10,6 @@ description_key = &"tech.nova_hull_foundation.description"
 origin_faction_id = &"nova_republic"
 tier = 1
 category = &"unit"
+unlocks_unit_ids = Array[StringName]([&"nova_vanguard"])
 mandatory_base_tech = true
 giftable = false

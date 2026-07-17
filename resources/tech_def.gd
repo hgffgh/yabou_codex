@@ -9,9 +9,15 @@ extends Resource
 @export var origin_faction_id: StringName
 @export_range(1, 5, 1) var tier: int = 1
 @export var category: StringName = &"unit"
-## Schema-only for now: nothing gates production/support-skill availability
-## on research yet (production only checks UnitDef.faction_origin_id).
+## Read by TechUnlock.is_unit_unlocked, which gates GameState.
+## queue_production/AiController._best_affordable_unit -- a unit not listed
+## by any tech here is unrestricted, matching UnitDef.faction_origin_id's
+## own gating alone.
 @export var unlocks_unit_ids: Array[StringName] = []
+## Schema-only for now: TechUnlock.is_skill_unlocked exists but nothing
+## calls it yet -- see that class's own doc comment for why gating a fixed,
+## non-player-selected support skill's live battle usability is a distinct,
+## more invasive change than production gating.
 @export var unlocks_skill_ids: Array[StringName] = []
 @export var candidate_tags: Array[StringName] = []
 ## Always placed in its origin faction's generated tree; never eligible for
@@ -20,7 +26,8 @@ extends Resource
 @export var giftable: bool = true
 ## Schema-only: no capture-analysis system exists yet.
 @export var capture_unlockable: bool = false
-## Schema-only: no encyclopedia/cross-campaign candidate-pool system exists
-## yet -- TechTreeGenerator currently draws from every non-mandatory TechDef
-## unconditionally. See HANDOFF.md for the scope tradeoff.
+## Schema-only: ProfileState.unlocked_tech_candidate_ids (the real
+## cross-campaign permanent pool TechTreeGenerator reads) only grows via
+## researching a tech, not via completing the encyclopedia -- see
+## TechTreeGenerator's own doc comment.
 @export var encyclopedia_unlockable: bool = true
