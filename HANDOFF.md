@@ -489,33 +489,55 @@ called `_refresh()`, but `_refresh()` itself unconditionally overwrites
 `_status_label.text` (to `""` or the phase-gating hint) as its first
 step — so the result message never actually reached the player, silently
 clobbered every time. Fixed in both panels by calling `_refresh()` first
-and setting the result message after. The remaining gaps, in rough order
-of value:
+and setting the result message after.
+
+COMBAT_DETAIL_SPECIFICATION.md section 26's in-round abstract distance is
+implemented: `BattleEngagementState.engagement_distance_m` is a per-
+engagement value seeded from the real distance between the two squads'
+`world_position` the instant weapon contact forms
+(`BattleRuntimeState._start_available_engagements`), then shifted every
+simulation tick by `_advance_engagement_distance` per both squads'
+`BattlePolicy` — OFFENSIVE/BALANCED commit their squad's battlefield speed
+(100%/50%) entirely to closing the distance, DEFENSIVE/SUPPORT/RETREAT
+commit theirs (25%/50%/100%) entirely to opening it, matching the spec's
+table exactly, clamped at a 0 minimum. `BattleCombatSystem._select_target`
+now checks a weapon's range against this abstract distance via the new
+`BattleRuntimeState.engagement_distance_m(squad_id)` instead of the real
+`world_position` distance it used to read — the real position stays frozen
+for the whole battle while any engagement exists (unchanged, pre-existing
+behavior), so this is the only thing that actually changes: which weapons
+stay usable can now shift mid-round independent of the battle map, exactly
+as the spec intends, and the next round's initial distance is always
+recomputed fresh from the real position once the current one ends. This
+surfaced a real, spec-correct behavior change that broke an existing test's
+assumption: `fog_of_war_test.gd`'s reveal-window case had both squads
+default to BALANCED, which mutually closes distance fast enough that
+crimson_bastion's slow action-gauge fill let the range collapse below its
+siege_cannon's 60m minimum before it ever got to fire at all; fixed by
+giving both squads DEFENSIVE for that test instead (mutual withdrawal, with
+comfortable margin under the weapon's 300m max for the test's duration) —
+not a bug, just this mechanic's first real interaction with an existing
+fixture. The remaining gaps, in rough order of value:
 
 1. The event system (`EventDef`, main/sub events, dialogue UI, and a
    condition evaluator) remains schema-only — it was explicitly scoped out
    of the diplomacy milestone above as its own, much larger undertaking.
-2. COMBAT_DETAIL_SPECIFICATION.md section 26's in-round abstract
-   approach/withdrawal-distance mechanic (decoupled from `world_position`,
-   can shift which weapons stay in range mid-round) remains unimplemented
-   — a distinct, intricate mechanic from the pre-contact positioning and
-   terrain zones above, deserving its own pass.
-3. Tech gifting (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) was
+2. Tech gifting (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) was
    scoped out of the diplomacy milestone above: it needs a
    research-candidate/tech-node system that doesn't exist yet (the current
    `Faction.tech_tier` is still the flat five-cost-tier placeholder, not
    the generated tech-node graph DATA_DEFINITION.md targets), so there is
    nowhere for a gifted candidate to be registered. `Diplomacy` and
    `RelationState` are otherwise ready for it (same gift cooldown).
-4. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
+3. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
    placeholder in `GameState._apply_battle_pilot_exp` — there is no
    `ProfileState`/achievement system to source it from yet. Autosave
    (see the save/load milestone above) is in the same boat: there is no
    `manual_save_slots`/`autosave_slots` split to drive it from yet either.
-5. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
+4. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
    is declared but nothing reads it, and the save schema's `difficulty_id`
    is correspondingly omitted from the save/load milestone above).
-6. Environment-aptitude accuracy/evasion bonuses (`GameConstants.
+5. Environment-aptitude accuracy/evasion bonuses (`GameConstants.
    APTITUDE_ACCURACY_ADDITIONS`/`APTITUDE_EVASION_ADDITIONS`) remain
    unwired, same as the move-speed multiplier was before the terrain-zone
    milestone above — out of scope there since that spec section only
@@ -810,6 +832,22 @@ at `res://data/units/` is now the only unit-definition path.
   get_global_name() == "PilotAssignmentPanel"` plus `Object.call()`/`get()`
   to reach it dynamically instead, as the ad hoc smoke checks for
   `SaveLoadPanel`/`DiplomacyPanel`/`PilotAssignmentPanel` all did.
+- Run `res://tests/round_distance_test.gd` for `_round_distance_rate`
+  matching the policy table exactly, a fresh engagement seeding
+  `engagement_distance_m` from the real world distance, mutual OFFENSIVE
+  closing it and mutual RETREAT opening it, the 0-minimum clamp, a weapon
+  going unusable once the abstract distance drifts past its range even
+  though `world_position` (checked directly) is untouched and still in
+  range, `world_position` staying frozen for the whole battle while the
+  abstract distance visibly drifts, and a new engagement after the old one
+  ends recomputing its distance from the (moved) real position rather than
+  inheriting the old engagement's drifted value. Calling
+  `update_engagements(delta)` with a large `delta` to fast-forward through
+  a squad's post-engagement `reengage_wait_sec` cooldown also advances any
+  engagement that forms in that same call by the full `delta` — clear the
+  cooldown fields directly instead of passing a large delta when a test
+  wants to inspect a freshly-formed engagement's just-seeded distance
+  before anything has had a chance to move it.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

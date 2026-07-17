@@ -260,6 +260,14 @@ func engaged_opponent_id(squad_id: StringName) -> StringName:
 	var engagement := engagements_by_squad_id.get(squad_id) as BattleEngagementState
 	return engagement.opponent_of(squad_id) if engagement != null else &""
 
+## The abstract in-round distance for a squad's current engagement
+## (COMBAT_DETAIL_SPECIFICATION.md section 26), or INF if it isn't engaged --
+## a range check against INF always fails, matching "no valid engagement to
+## have a distance in" rather than accidentally reading as "in range."
+func engagement_distance_m(squad_id: StringName) -> float:
+	var engagement := engagements_by_squad_id.get(squad_id) as BattleEngagementState
+	return engagement.engagement_distance_m if engagement != null else INF
+
 func has_unconfirmed_engagement() -> bool:
 	for engagement: BattleEngagementState in engagements_by_squad_id.values():
 		if not engagement.confirmed: return true
@@ -281,6 +289,7 @@ func update_engagements(delta_sec: float) -> void:
 	for engagement: BattleEngagementState in unique:
 		if not engagement.confirmed: continue
 		engagement.elapsed_sec += delta_sec
+		_advance_engagement_distance(engagement, delta_sec)
 		if engagement.elapsed_sec >= BattleEngagementState.ROUND_DURATION_SEC - 0.000001:
 			_end_engagement(engagement)
 
@@ -299,6 +308,7 @@ func _start_available_engagements() -> void:
 			engagement.first_squad_id = first_id
 			engagement.second_squad_id = second_id
 			engagement.confirmed = not require_round_confirmation
+			engagement.engagement_distance_m = _squad_distance(first, second)
 			engagements_by_squad_id[first_id] = engagement
 			engagements_by_squad_id[second_id] = engagement
 			first.destination = first.world_position
@@ -340,8 +350,45 @@ func _reselect_leader_if_needed(squad: BattleSquadState) -> void:
 	squad.leader_command = candidates[0].command
 
 func _squads_in_weapon_contact(first: BattleSquadState, second: BattleSquadState) -> bool:
-	var distance := Vector2(first.world_position.x, first.world_position.y).distance_to(Vector2(second.world_position.x, second.world_position.y))
-	return distance <= maxf(_squad_max_usable_range(first), _squad_max_usable_range(second))
+	return _squad_distance(first, second) <= maxf(_squad_max_usable_range(first), _squad_max_usable_range(second))
+
+
+static func _squad_distance(a: BattleSquadState, b: BattleSquadState) -> float:
+	return Vector2(a.world_position.x, a.world_position.y).distance_to(Vector2(b.world_position.x, b.world_position.y))
+
+
+## COMBAT_DETAIL_SPECIFICATION.md section 26's table: each policy commits
+## its squad's battlefield speed entirely to either closing or opening the
+## in-round distance, at a fixed fraction. Never both, and OFFENSIVE/BALANCED
+## contribute nothing to withdrawal (and vice versa for the other three).
+static func _round_distance_rate(policy: GameEnums.BattlePolicy, speed: float) -> Dictionary:
+	match policy:
+		GameEnums.BattlePolicy.OFFENSIVE:
+			return {"approach": speed, "withdraw": 0.0}
+		GameEnums.BattlePolicy.BALANCED:
+			return {"approach": speed * 0.5, "withdraw": 0.0}
+		GameEnums.BattlePolicy.DEFENSIVE:
+			return {"approach": 0.0, "withdraw": speed * 0.25}
+		GameEnums.BattlePolicy.SUPPORT:
+			return {"approach": 0.0, "withdraw": speed * 0.5}
+		GameEnums.BattlePolicy.RETREAT:
+			return {"approach": 0.0, "withdraw": speed}
+	return {"approach": 0.0, "withdraw": 0.0}
+
+
+## 距離変化速度 ＝ 双方の離隔速度合計 − 双方の接近速度合計. Never written back
+## to world_position (BattlePrototypeView/_advance_squad_movement both
+## freeze real movement for the whole battle while any engagement exists),
+## and clamped at 0 since a negative abstract distance is meaningless.
+func _advance_engagement_distance(engagement: BattleEngagementState, delta_sec: float) -> void:
+	var first := squad_states_by_id.get(engagement.first_squad_id) as BattleSquadState
+	var second := squad_states_by_id.get(engagement.second_squad_id) as BattleSquadState
+	if first == null or second == null:
+		return
+	var rate_first := _round_distance_rate(first.policy, _squad_speed(first))
+	var rate_second := _round_distance_rate(second.policy, _squad_speed(second))
+	var change := (float(rate_first.withdraw) + float(rate_second.withdraw)) - (float(rate_first.approach) + float(rate_second.approach))
+	engagement.engagement_distance_m = maxf(0.0, engagement.engagement_distance_m + change * delta_sec)
 
 func _squad_max_usable_range(squad: BattleSquadState) -> float:
 	var result := 0.0

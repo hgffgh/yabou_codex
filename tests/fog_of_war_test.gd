@@ -133,8 +133,18 @@ func _test_firing_from_outside_sensor_range_opens_reveal_window() -> void:
 	if battle == null:
 		return
 	var attacker_squad := battle.squad_states_by_id[attacker.squad.squad_id] as BattleSquadState
+	var defender_squad := battle.squad_states_by_id[defender.squad.squad_id] as BattleSquadState
 	attacker_squad.world_position = Vector3(0, 0, 0)
-	(battle.squad_states_by_id[defender.squad.squad_id] as BattleSquadState).world_position = Vector3(200, 0, 0)
+	defender_squad.world_position = Vector3(200, 0, 0)
+	# COMBAT_DETAIL_SPECIFICATION.md section 26: both squads default to
+	# BALANCED, which mutually approaches and would collapse the in-round
+	# abstract distance below siege_cannon's 60m minimum range before
+	# crimson_bastion's slow action gauge even fills once, so it would
+	# never get to fire at all. DEFENSIVE on both instead grows the
+	# distance (with comfortable margin under the 300m max range for the
+	# duration of this test), keeping the shot this test needs reliable.
+	attacker_squad.policy = GameEnums.BattlePolicy.DEFENSIVE
+	defender_squad.policy = GameEnums.BattlePolicy.DEFENSIVE
 
 	var revealed := false
 	for _tick in range(200):

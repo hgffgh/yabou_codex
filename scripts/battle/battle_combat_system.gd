@@ -172,13 +172,18 @@ static func _prepare_attack(battle: BattleRuntimeState, attacker_id: StringName)
 			return {"attacker_id": attacker_id, "target_ids": _pattern_targets(battle, target_id, attacker_squad, weapon), "weapon_id": weapon_id, "weapon": weapon}
 	return {}
 
+## COMBAT_DETAIL_SPECIFICATION.md section 26: range is checked against the
+## engagement's abstract in-round distance, not the (frozen, real) squad
+## world_position -- the whole point of the mechanic is that this distance
+## can shift within a round independently of the battlefield map, changing
+## which weapons stay usable as the round goes on.
 static func _select_target(battle: BattleRuntimeState, attacker_squad: BattleSquadState, weapon: WeaponDef) -> StringName:
-	var candidates: Array[BattleUnitState] = []
 	var opponent_id := battle.engaged_opponent_id(attacker_squad.squad_id)
+	var distance := battle.engagement_distance_m(attacker_squad.squad_id)
+	if distance < weapon.min_range_m or distance > weapon.max_range_m: return &""
+	var candidates: Array[BattleUnitState] = []
 	for squad: BattleSquadState in battle.squad_states_by_id.values():
 		if squad.squad_id != opponent_id: continue
-		var distance := Vector2(attacker_squad.world_position.x, attacker_squad.world_position.y).distance_to(Vector2(squad.world_position.x, squad.world_position.y))
-		if distance < weapon.min_range_m or distance > weapon.max_range_m: continue
 		for unit_id: StringName in squad.unit_instance_ids:
 			var target := battle.unit_states_by_id[unit_id] as BattleUnitState
 			if target.current_hp <= 0: continue
@@ -186,8 +191,6 @@ static func _select_target(battle: BattleRuntimeState, attacker_squad: BattleSqu
 	if candidates.is_empty() and weapon.can_target_rear:
 		for squad: BattleSquadState in battle.squad_states_by_id.values():
 			if squad.squad_id != opponent_id: continue
-			var distance := Vector2(attacker_squad.world_position.x, attacker_squad.world_position.y).distance_to(Vector2(squad.world_position.x, squad.world_position.y))
-			if distance < weapon.min_range_m or distance > weapon.max_range_m: continue
 			for unit_id: StringName in squad.unit_instance_ids:
 				var target := battle.unit_states_by_id[unit_id] as BattleUnitState
 				if target.current_hp > 0 and target.slot_index >= 3: candidates.append(target)
