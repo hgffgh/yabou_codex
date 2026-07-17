@@ -295,6 +295,12 @@ func _build_ui_overlay() -> void:
 	diplomacy_button.pressed.connect(_on_diplomacy_pressed)
 	top_bar.add_child(diplomacy_button)
 
+	var pilot_button := Button.new()
+	pilot_button.text = "編成"
+	pilot_button.custom_minimum_size = Vector2(90, 40)
+	pilot_button.pressed.connect(_on_pilot_assignment_pressed)
+	top_bar.add_child(pilot_button)
+
 	var save_load_button := Button.new()
 	save_load_button.text = "セーブ/ロード"
 	save_load_button.custom_minimum_size = Vector2(120, 40)
@@ -660,6 +666,11 @@ func _on_save_load_pressed() -> void:
 
 func _on_diplomacy_pressed() -> void:
 	var panel := DiplomacyPanel.new()
+	add_child(panel)
+	panel.setup(GameState.player_faction_id)
+
+func _on_pilot_assignment_pressed() -> void:
+	var panel := PilotAssignmentPanel.new()
 	add_child(panel)
 	panel.setup(GameState.player_faction_id)
 

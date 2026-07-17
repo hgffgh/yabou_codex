@@ -15,4 +15,4 @@ modifiers = {
 &"firepower": 30.0,
 &"critical": 10.0
 }
-action_skill_id = &""
+action_skill_id = &"field_repair"

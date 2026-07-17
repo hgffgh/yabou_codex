@@ -463,7 +463,34 @@ positions directly with no scene tree or physics server involved at all
 hard to author through text tools, it's architecturally the wrong tool
 here; a squad may still cross through an impassable zone while in transit
 toward a valid destination, since only the destination itself is validated,
-not the path to it. The remaining gaps, in rough order of value:
+not the path to it.
+
+`PilotSkillDef.action_skill_id` (DATA_DEFINITION.md section 13) is wired up:
+`BattleCombatSystem._active_pilot_skills` now centralizes the unlock_level/
+leader_only/condition_type gating that `pilot_skill_modifier` used to do
+alone, and a new `pilot_action_skill_ids` reads the same gated skill list
+for any granted `action_skill_id`s, which `_prepare_support` folds into a
+unit's normal support-skill candidate pool (sorted by priority exactly like
+`UnitDef.support_skill_ids`). `aria_last_stand` (unlocks at Lv10, active at
+≤30% HP) now grants `field_repair`, demonstrated against `nova_scout`,
+whose `UnitDef.support_skill_ids` is empty, so any repair capability
+observed in the test can only have come from the pilot grant. A new
+`PilotAssignmentPanel` (mirroring the other panels' style) exposes
+`CampaignRuntimeState.assign_pilot_to_unit`/`unassign_pilot` — previously
+tested backend logic invoked only by `GameState`'s transitional
+deterministic seeding — from the strategic map: each of the player's
+pilots gets a row showing level/EXP/injury status and current assignment,
+an `OptionButton` listing every eligible active unit (labeled with its
+current occupant, since assigning silently displaces whoever's aboard),
+and 搭乗/解除 buttons. Fixed a real bug caught while smoke-testing it, also
+present in `DiplomacyPanel` since it was copied from there: every panel's
+action handlers set `_status_label.text` to a result message and *then*
+called `_refresh()`, but `_refresh()` itself unconditionally overwrites
+`_status_label.text` (to `""` or the phase-gating hint) as its first
+step — so the result message never actually reached the player, silently
+clobbered every time. Fixed in both panels by calling `_refresh()` first
+and setting the result message after. The remaining gaps, in rough order
+of value:
 
 1. The event system (`EventDef`, main/sub events, dialogue UI, and a
    condition evaluator) remains schema-only — it was explicitly scoped out
@@ -485,18 +512,14 @@ not the path to it. The remaining gaps, in rough order of value:
    `ProfileState`/achievement system to source it from yet. Autosave
    (see the save/load milestone above) is in the same boat: there is no
    `manual_save_slots`/`autosave_slots` split to drive it from yet either.
-5. `PilotSkillDef.action_skill_id` (granting an extra active support skill)
-   and a player-facing pilot-assignment UI (`assign_pilot_to_unit`/
-   `unassign_pilot` are tested but only called by `GameState`'s
-   transitional deterministic seeding today) remain unimplemented.
-6. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
+5. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
    is declared but nothing reads it, and the save schema's `difficulty_id`
    is correspondingly omitted from the save/load milestone above).
-7. Environment-aptitude accuracy/evasion bonuses (`GameConstants.
+6. Environment-aptitude accuracy/evasion bonuses (`GameConstants.
    APTITUDE_ACCURACY_ADDITIONS`/`APTITUDE_EVASION_ADDITIONS`) remain
-   unwired, same as the move-speed multiplier was before this milestone —
-   out of scope here since the terrain spec only called for the speed
-   term.
+   unwired, same as the move-speed multiplier was before the terrain-zone
+   milestone above — out of scope there since that spec section only
+   called for the speed term.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -773,6 +796,20 @@ at `res://data/units/` is now the only unit-definition path.
   lets an AI-controlled squad close an unrealistic distance and start a
   real fight in one step, as this test's hazard cases discovered the hard
   way (`_pin_defender_far_away`).
+- `pilot_skills_test.gd` gained `_test_action_skill_id_grants_an_extra_
+  support_skill`: proves `field_repair` is absent from `nova_scout` (its
+  own `support_skill_ids` is empty), stays absent before Lv10 or above the
+  30% HP threshold, appears via `pilot_action_skill_ids` once both are
+  satisfied, and that `_prepare_support` actually selects it as a real
+  combat action. When testing UI panels under `scenes/strategic_map/` by
+  calling their handlers directly (bypassing button `disabled` gating),
+  don't declare a variable with the panel's own type in a fresh `--script`
+  entry (e.g. `var panel: PilotAssignmentPanel`) — that's the same headless
+  compile-order bug as `diplomacy.gd` used to hit, since these files still
+  bare-reference `GameState`/`TurnManager`. Use `child.get_script().
+  get_global_name() == "PilotAssignmentPanel"` plus `Object.call()`/`get()`
+  to reach it dynamically instead, as the ad hoc smoke checks for
+  `SaveLoadPanel`/`DiplomacyPanel`/`PilotAssignmentPanel` all did.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

@@ -89,6 +89,9 @@ static func _prepare_support(battle: BattleRuntimeState, source_id: StringName) 
 	var unit_def := battle.unit_defs.get(source.unit_def_id) as UnitDef
 	if unit_def == null: return {}
 	var skill_ids := unit_def.support_skill_ids.duplicate()
+	for granted_id: StringName in pilot_action_skill_ids(battle, source):
+		if not skill_ids.has(granted_id):
+			skill_ids.append(granted_id)
 	skill_ids.sort_custom(func(a: StringName, b: StringName) -> bool:
 		var left := battle.support_skill_defs.get(a) as SupportSkillDef
 		var right := battle.support_skill_defs.get(b) as SupportSkillDef
@@ -297,14 +300,19 @@ static func _attribute_multiplier(unit_def: UnitDef, attribute: int) -> float:
 ## `key` (one of PILOT_MODIFIERS in master_data_validator.gd) across a
 ## pilot's currently-unlocked, condition-satisfied skills. Generic pilots
 ## (empty pilot_id) always contribute 0.
-static func pilot_skill_modifier(battle: BattleRuntimeState, unit: BattleUnitState, key: StringName) -> float:
+## Every currently-unlocked, condition-satisfied PilotSkillDef for this
+## unit's pilot (unlock_level, leader_only, and condition_type all gated
+## the same way regardless of whether the caller wants passive modifiers
+## or an action_skill_id) -- shared by pilot_skill_modifier and
+## pilot_action_skill_ids so that gating logic exists in exactly one place.
+static func _active_pilot_skills(battle: BattleRuntimeState, unit: BattleUnitState) -> Array[PilotSkillDef]:
+	var result: Array[PilotSkillDef] = []
 	if unit.pilot_id.is_empty():
-		return 0.0
+		return result
 	var pilot_def := battle.pilot_defs.get(unit.pilot_id) as PilotDef
 	if pilot_def == null:
-		return 0.0
+		return result
 	var squad := battle.squad_states_by_id.get(unit.squad_id) as BattleSquadState
-	var total := 0.0
 	for skill_id: StringName in pilot_def.skill_ids:
 		var skill := battle.pilot_skill_defs.get(skill_id) as PilotSkillDef
 		if skill == null or unit.pilot_level < skill.unlock_level:
@@ -313,8 +321,28 @@ static func pilot_skill_modifier(battle: BattleRuntimeState, unit: BattleUnitSta
 			continue
 		if not _pilot_skill_condition_met(battle, unit, skill):
 			continue
+		result.append(skill)
+	return result
+
+
+static func pilot_skill_modifier(battle: BattleRuntimeState, unit: BattleUnitState, key: StringName) -> float:
+	var total := 0.0
+	for skill: PilotSkillDef in _active_pilot_skills(battle, unit):
 		total += float(skill.modifiers.get(key, 0.0))
 	return total
+
+
+## DATA_DEFINITION.md section 13's action_skill_id: an unlocked pilot skill
+## can grant its unit an additional usable support skill beyond the unit's
+## own fixed UnitDef.support_skill_ids, under the same gating rules as any
+## other pilot skill. _prepare_support folds this into the same
+## priority-sorted candidate pool as the unit's built-in support skills.
+static func pilot_action_skill_ids(battle: BattleRuntimeState, unit: BattleUnitState) -> Array[StringName]:
+	var result: Array[StringName] = []
+	for skill: PilotSkillDef in _active_pilot_skills(battle, unit):
+		if not skill.action_skill_id.is_empty() and not result.has(skill.action_skill_id):
+			result.append(skill.action_skill_id)
+	return result
 
 ## PILOT_CONDITIONS in master_data_validator.gd: always, hp_pct, en_pct,
 ## environment. hp_pct/en_pct trigger at or below condition_value (a

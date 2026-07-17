@@ -173,31 +173,34 @@ func _treaty_status_text(relation: RelationState) -> String:
 		return "%s / 提案不可(残り%d週)" % [base_text, relation.proposal_cooldown_turns]
 	return base_text
 
+## _refresh() itself sets _status_label to either "" or the phase-gating
+## hint, so the action-result message below must be applied *after* it --
+## setting it first would just get immediately clobbered.
 func _on_propose_pressed(other_id: StringName, treaty: GameEnums.TreatyType, duration: int) -> void:
 	var result := Diplomacy.propose_treaty(GameState, _faction_id, other_id, treaty, duration)
+	_refresh()
 	if not (result.errors as PackedStringArray).is_empty():
 		_status_label.text = "提案に失敗しました: %s" % (result.errors as PackedStringArray)[0]
 	elif result.success:
 		_status_label.text = "条約が成立しました。(成功率%d%%)" % int(result.success_rate_pct)
 	else:
 		_status_label.text = "条約提案は拒否されました。(成功率%d%%)" % int(result.success_rate_pct)
-	_refresh()
 
 func _on_break_pressed(other_id: StringName) -> void:
 	var errors := Diplomacy.break_treaty(GameState, _faction_id, other_id)
+	_refresh()
 	if not errors.is_empty():
 		_status_label.text = "条約破棄に失敗しました: %s" % errors[0]
 	else:
 		_status_label.text = "条約を破棄しました。"
-	_refresh()
 
 func _on_gift_pressed(other_id: StringName, funds: int, materials: int) -> void:
 	var errors := Diplomacy.gift_resources(GameState, _faction_id, other_id, funds, materials)
+	_refresh()
 	if not errors.is_empty():
 		_status_label.text = "贈与に失敗しました: %s" % errors[0]
 	else:
 		_status_label.text = "贈与しました。"
-	_refresh()
 
 func _on_close_pressed() -> void:
 	closed.emit()

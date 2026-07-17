@@ -16,6 +16,7 @@ func _initialize() -> void:
 	_test_leader_only_gates_the_skill()
 	_test_en_pct_and_environment_conditions()
 	_test_firepower_skill_measurably_increases_damage()
+	_test_action_skill_id_grants_an_extra_support_skill()
 	_finish()
 
 
@@ -162,6 +163,38 @@ func _test_firepower_skill_measurably_increases_damage() -> void:
 		"expected a guaranteed hit at seed %d for this test to be meaningful (with=%d without=%d)" % [seed, damage_with_skill, damage_without_skill])
 	_check(damage_with_skill > damage_without_skill,
 		"aria_last_stand's firepower bonus should increase damage given an identical RNG sequence (with=%d without=%d)" % [damage_with_skill, damage_without_skill])
+
+
+## DATA_DEFINITION.md section 13's action_skill_id: aria_last_stand grants
+## field_repair once unlocked (Lv10) and its hp_pct <= 0.3 condition is met.
+## Uses nova_scout, whose UnitDef.support_skill_ids is empty, so any repair
+## capability observed must have come from the pilot grant, not the unit.
+func _test_action_skill_id_grants_an_extra_support_skill() -> void:
+	var battle := _build_solo_battle(&"nova_scout", &"crimson_bastion")
+	if battle == null:
+		return
+	var pilot: PilotState = game_state.campaign_runtime.get_pilot(&"aria_nova")
+	var unit := _first_unit(battle, battle.attacker_squad_ids)
+	var unit_def := battle.unit_defs[&"nova_scout"] as UnitDef
+	_check(unit_def.support_skill_ids.is_empty(), "setup: nova_scout should have no built-in support skills for this test to be meaningful")
+
+	unit.current_hp = int(round(float(unit.max_hp) * 0.2))
+	_check(BattleCombatSystem.pilot_action_skill_ids(battle, unit).is_empty(),
+		"the action skill should not be granted before the pilot reaches its unlock level")
+
+	pilot.level = 10
+	unit.pilot_level = pilot.level
+	_check(BattleCombatSystem.pilot_action_skill_ids(battle, unit) == [&"field_repair"],
+		"aria_last_stand should grant field_repair once level 10 and its HP condition are both satisfied")
+
+	unit.current_en = 999
+	var support: Dictionary = BattleCombatSystem._prepare_support(battle, unit.unit_instance_id)
+	_check(not support.is_empty() and (support.skill as SupportSkillDef).id == &"field_repair",
+		"_prepare_support should pick the pilot-granted skill when it's the only one available")
+
+	unit.current_hp = unit.max_hp
+	_check(BattleCombatSystem.pilot_action_skill_ids(battle, unit).is_empty(),
+		"the action skill should stop being granted once its HP condition is no longer met")
 
 
 func _build_solo_battle(
