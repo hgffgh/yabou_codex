@@ -85,6 +85,7 @@ func _begin_faction_turn() -> void:
 	_set_phase(Phase.INCOME)
 	_run_income_phase(active_faction_id)
 	GameState.advance_repairs_for_faction(active_faction_id)
+	GameState.advance_pilot_injuries_for_faction(active_faction_id)
 	_set_phase(Phase.ORDERS)
 
 ## Called by the StrategicMap UI's "End Turn" button.

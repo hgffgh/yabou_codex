@@ -17,3 +17,12 @@ var last_battle_time_sec: float = -1.0
 var intel_revision: int = 0
 var leader_unit_id: StringName = &""
 var leader_command: int = 100
+
+## Fog-of-war state (COMBAT_DETAIL_SPECIFICATION.md section 24). intel_confirmed
+## is sticky for the rest of the battle once true; currently_sensed is
+## recomputed every tick and only controls whether the live position is
+## used versus the frozen last_known_world_position.
+var intel_confirmed: bool = false
+var currently_sensed: bool = false
+var last_known_world_position: Vector3 = Vector3.ZERO
+var revealed_until_world_sec: float = 0.0

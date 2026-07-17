@@ -53,6 +53,7 @@ func advance_time(delta_sec: float) -> void:
 	_advance_capture(applied)
 	if not had_engagement:
 		_advance_control_point_recovery(applied)
+	_advance_intel_sensing()
 	if result != null:
 		return
 	var all_attackers_ready := not attacker_squad_ids.is_empty()
@@ -128,6 +129,10 @@ func _end_engagement(engagement: BattleEngagementState) -> void:
 				var unit := unit_states_by_id[unit_id] as BattleUnitState
 				unit.action_gauge = 0.0
 				unit.post_action_delay_sec = 0.0
+				# STRATEGY_DETAIL_SPECIFICATION.md section 5.3: every roster
+				# unit (alive or destroyed this round) earns round-participation
+				# EXP once the round it was part of concludes.
+				unit.exp_earned += GameConstants.PILOT_EXP_ROUND_PARTICIPATION
 		engagements_by_squad_id.erase(squad_id)
 
 func _reselect_leader_if_needed(squad: BattleSquadState) -> void:
@@ -167,6 +172,50 @@ func _squad_has_living_units(squad: BattleSquadState) -> bool:
 	for unit_id: StringName in squad.unit_instance_ids:
 		if (unit_states_by_id[unit_id] as BattleUnitState).current_hp > 0: return true
 	return false
+
+## COMBAT_DETAIL_SPECIFICATION.md section 24: a squad becomes confirmed
+## (sticky for the rest of the battle) once it has engaged in combat or come
+## within an enemy squad's sensor range (recomputed here as the max
+## sensor_range_m among that squad's living units). currently_sensed is not
+## sticky -- it only governs whether the view shows the live position or
+## freezes at last_known_world_position, and also covers the 5-second
+## firing-disclosure window BattleCombatSystem opens when a squad attacks
+## from outside sensor range.
+func _advance_intel_sensing() -> void:
+	for squad: BattleSquadState in squad_states_by_id.values():
+		squad.sensor_range_m = _squad_max_sensor_range(squad)
+	for squad: BattleSquadState in squad_states_by_id.values():
+		if not _squad_has_living_units(squad):
+			continue
+		var in_sensor_range := false
+		for opponent: BattleSquadState in squad_states_by_id.values():
+			if opponent.faction_id == squad.faction_id or not _squad_has_living_units(opponent):
+				continue
+			var distance := Vector2(opponent.world_position.x, opponent.world_position.y).distance_to(Vector2(squad.world_position.x, squad.world_position.y))
+			if distance <= opponent.sensor_range_m:
+				in_sensor_range = true
+				break
+		# currently_sensed governs only whether the *live* position is
+		# trackable (real sensor coverage or the firing-disclosure window);
+		# engagement alone reveals composition (intel_confirmed) but not a
+		# continuous position fix, which is what makes the reveal window a
+		# distinct, meaningful mechanic rather than redundant with combat.
+		squad.currently_sensed = in_sensor_range or elapsed_world_sec < squad.revealed_until_world_sec
+		if squad.currently_sensed or is_squad_engaged(squad.squad_id):
+			squad.intel_confirmed = true
+		if squad.currently_sensed:
+			squad.last_known_world_position = squad.world_position
+
+func _squad_max_sensor_range(squad: BattleSquadState) -> float:
+	var result := 0.0
+	for unit_id: StringName in squad.unit_instance_ids:
+		var unit := unit_states_by_id[unit_id] as BattleUnitState
+		if unit.current_hp <= 0:
+			continue
+		var unit_def := unit_defs.get(unit.unit_def_id) as UnitDef
+		if unit_def != null:
+			result = maxf(result, unit_def.sensor_range_m)
+	return result
 
 func _advance_capture(applied_sec: float) -> void:
 	if not engagements_by_squad_id.is_empty():
@@ -267,4 +316,19 @@ func finalize(winner_id: StringName, loser_id: StringName, reason: StringName) -
 		if unit.destroyed_this_battle or unit.current_hp <= 0:
 			result.destroyed_unit_ids.append(unit_id)
 	result.destroyed_unit_ids.sort_custom(func(a: StringName, b: StringName) -> bool: return String(a) < String(b))
+	# STRATEGY_DETAIL_SPECIFICATION.md section 5.3: every roster unit on the
+	# winning side earns a victory bonus (destroyed/injured pilots keep it
+	# too). HQ capture pays the larger bonus instead of the general one,
+	# not in addition to it -- the two award-table rows are read as tiers
+	# of the same "battle map victory" event, not stacking bonuses.
+	var victory_exp := GameConstants.PILOT_EXP_HQ_CAPTURE_VICTORY if reason == &"hq_capture" else GameConstants.PILOT_EXP_BATTLE_VICTORY
+	var winner_squad_ids := attacker_squad_ids if winner_id == attacker_faction_id else defender_squad_ids
+	for squad_id: StringName in winner_squad_ids:
+		var squad := squad_states_by_id.get(squad_id) as BattleSquadState
+		if squad == null:
+			continue
+		for unit_id: StringName in squad.unit_instance_ids:
+			var unit := unit_states_by_id.get(unit_id) as BattleUnitState
+			if unit != null:
+				unit.exp_earned += victory_exp
 	return errors

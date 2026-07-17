@@ -65,14 +65,86 @@ The battle-result and combat-routing correctness pass is complete:
   every turn and silently skipped forever
 - `GameState.apply_battle_result` now resolves every destroyed unit's fate:
   the winner's own losses become unassigned `DESTROYED_RECOVERED` records,
-  a deterministic ~10% of the loser's losses are captured into a fresh
-  one-unit squad for the winner (generic-piloted, 1 HP, placed in the battle
-  region), and the remainder are fully removed from the campaign
+  a 10%-probability roll per capturable loser loss (via the battle's own
+  deterministic RNG stream) captures it into a fresh one-unit squad for the
+  winner (generic-piloted, 1 HP, placed in the battle region), and the
+  remainder are fully removed from the campaign
 - The "battle" combat-log entry is restored on `TurnManager` so
   `Diplomacy.apply_combat_events` actually applies its attack-relation
   penalty again, and the dead unreachable code block in
   `complete_battle_runtime` (`_strongest_faction`/`_auto_capture`/
   `_resolve_combat`) and the vignette-only signal wiring were removed
+
+The pilot progression milestone is complete:
+
+- `PilotState` (level, current EXP, injury countdown, unit assignment) is
+  seeded at `PilotDef.initial_level` for every roster pilot at new-game time
+  and auto-claims a still-generic-piloted unit for its faction, matching
+  `_seed_initial_squads`' transitional loadout pattern
+- `CampaignRuntimeState.assign_pilot_to_unit`/`unassign_pilot` implement the
+  displacement rules from STRATEGY_DETAIL_SPECIFICATION.md section 5:
+  placing a named pilot silently swaps out whichever pilot (generic or
+  named) already crews both the source and destination unit; injured
+  pilots cannot be (re)assigned
+- Battle units now use each pilot's *current*, growth-adjusted stats
+  (`initial_* + growth_* * (level - 1)`, capped at 200) instead of always
+  their level-1 baseline
+- EXP is earned exactly per section 5.3's table (round participation 50,
+  enemy destroyed 50 split across every contributing attacker, support
+  success 20 only when HP/EN actually increased, battle victory 50 or HQ
+  capture 100 for every unit on the winning roster) and applied with
+  `ceil()` and bracket-based leveling up to the level-50 cap once the
+  battle resolves
+- Any destroyed unit's named pilot is injured for three turns and
+  unassigned regardless of which side won (COMBAT_DETAIL_SPECIFICATION.md
+  section 18), decremented once per that faction's own turn via
+  `GameState.advance_pilot_injuries_for_faction`
+- Fixed two related capture bugs found while implementing this: the capture
+  roll is now a genuine 10%-probability roll (it was a deterministic
+  fractional-carry accumulator that always captured exactly 1-in-10) and
+  `UnitDef.capture_allowed == false` units are now correctly always lost
+  rather than being subject to a roll at all
+
+The in-battle fog-of-war milestone (COMBAT_DETAIL_SPECIFICATION.md section
+24) is complete, scoped to the battle overlay only -- see the explicit
+deferrals below:
+
+- `BattleSquadState` gains `intel_confirmed` (sticky for the rest of the
+  battle), `currently_sensed` (recomputed every tick), `last_known_world_position`,
+  and `revealed_until_world_sec`. `BattleRuntimeState._advance_intel_sensing`
+  (called every `advance_time` tick) also finally wires up the
+  long-declared-but-dead `BattleSquadState.sensor_range_m` field, recomputing
+  it each tick as the max `UnitDef.sensor_range_m` among that squad's living
+  units
+- `intel_confirmed` (composition/HP/EN become visible) is set by either
+  engaging in combat or coming within an enemy squad's sensor range;
+  `currently_sensed` (whether the *live* position or the frozen
+  last-known one is shown) is governed only by actual sensor coverage or
+  an active reveal window -- combat contact alone does not grant continuous
+  position tracking, which is what keeps the firing-disclosure rule below
+  meaningful rather than redundant
+- Firing a weapon while not `currently_sensed` opens a 5-battle-second
+  reveal window (`BattleCombatSystem`), matching the spec's "attacking from
+  outside sensor range discloses current position for 5 seconds" rule
+- `BattlePrototypeView` hides an unconfirmed enemy squad's icon and HP/EN
+  bars entirely, renders a confirmed-but-out-of-range squad frozen at its
+  last known position, and the pre-battle confirmation panel now shows
+  "未確認" instead of exact HP/EN for any enemy squad not yet confirmed
+
+Explicitly deferred (kept out of this pass to avoid building unconsumed
+scaffolding):
+
+- No persistent, cross-battle `IntelRecordState` (DATA_DEFINITION.md
+  section 21) -- confirmation is battle-scoped only and resets next battle.
+- No strategic-map fog of war -- region badges still show full enemy
+  composition unconditionally; the detail specs only fully specify fog
+  rules for the battle view, not a strategic-map sensor model.
+- No intel-purchase feature (STRATEGY_DETAIL_SPECIFICATION.md section 11.7)
+  and no encyclopedia registration on first contact.
+- The pre-battle power estimate still computes from each unit's real
+  stats, not the category/faction/era averages the spec calls for when a
+  squad is unconfirmed -- the existing five-band rating already hides exact
+  numbers, which covers most of the intent.
 
 ## Source of truth
 
@@ -136,20 +208,24 @@ Relevant prototype files:
 ## Recommended next task
 
 The legacy `UnitStack`/`CombatResolver`/`BattleVignette` prototype path is
-gone, and battle-result application (destroyed/recovered/captured/lost,
-diplomacy penalties) is complete. The remaining gaps, in rough order of
-value:
+gone, battle-result application (destroyed/recovered/captured/lost,
+diplomacy penalties) is complete, named pilots now level up, earn EXP, and
+get injured per spec, and the battle view now respects sensor-based fog of
+war. The remaining gaps, in rough order of value:
 
-1. Pilot progression: a runtime `PilotState` (level, EXP, three-turn injury
-   countdown) does not exist yet. `PilotDef.growth_*` and
-   `PilotSkillDef.modifiers` are validated at startup but never read during
-   combat, so pilots are static stat blocks regardless of level, and
-   `BattleUnitState.exp_earned`/`BattleResultState.pilot_exp`/
-   `injured_pilot_ids` are declared fields that are always empty.
-2. Fog of war: `SquadState.intel_revision` is correctly threaded through to
-   `BattleSquadState` and validated, but nothing consumes it yet — enemy
-   composition is always fully visible in both the battle view and the
-   strategic map.
+1. Pilot skills: `PilotSkillDef.modifiers`/`condition_type`/`leader_only`
+   are validated at startup but never read during combat — learned skills
+   have no effect. This was deliberately deferred from the pilot-progression
+   pass because `res://data/pilot_skills/` is still empty (both current
+   pilots have `skill_ids = []`), so there is no real data yet to validate a
+   generic condition/modifier evaluator against. There is also no player
+   formation UI for pilot assignment yet — `assign_pilot_to_unit`/
+   `unassign_pilot` exist and are tested, but only `GameState`'s
+   transitional deterministic seeding calls them today.
+2. Persistent intel and strategic-map fog of war: fog of war only exists
+   inside a single battle right now (see the fog-of-war milestone above for
+   what's deliberately still missing — `IntelRecordState` persistence,
+   strategic-map visibility, and the intel-purchase feature).
 3. AI-vs-AI battle auto-resolution: every combat contact, including battles
    the player has no stake in, currently requires manually playing through
    the full RTS overlay, because `BattlePrototypeView` has no non-interactive
@@ -162,13 +238,16 @@ value:
    defending squads never move, retreat, or defend on their own inside a
    battle (only player-issued squads reposition).
 5. Save/load: per-object `to_dict()/from_dict()` round-tripping already
-   exists and is tested for campaign/squad/unit/production state, but there
-   is no top-level `CampaignSaveData` aggregator, no file I/O, and no
+   exists and is tested for campaign/squad/unit/production/pilot state, but
+   there is no top-level `CampaignSaveData` aggregator, no file I/O, and no
    save/load UI.
 6. Diplomacy treaties and the event system remain schema-only —
    `TreatyType`/`RelationState`/`EventDef` have no runtime logic beyond the
    lightweight numeric relation score (`Faction.relations`,
    `scripts/factions/diplomacy.gd`) already driving AI attack targeting.
+7. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
+   placeholder in `GameState._apply_battle_pilot_exp` — there is no
+   `ProfileState`/achievement system to source it from yet.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -373,6 +452,21 @@ at `res://data/units/` is now the only unit-definition path.
   detection and the sequential pairwise resolution that replaced its
   permanent dead end (exercised with a synthetic third faction, since the
   current two-faction dataset can't otherwise produce the scenario).
+- Run `res://tests/pilot_progression_test.gd` for pilot seeding at
+  `initial_level`, assign/unassign displacement and injury gating,
+  growth-adjusted battle stats, EXP awarding and level-up across the 250-EXP
+  band, three-turn injury application/decrement, and the
+  `capture_allowed == false` always-lost fix.
+- Run `res://tests/fog_of_war_test.gd` for asymmetric sensor-range
+  confirmation, sticky `intel_confirmed` versus non-sticky `currently_sensed`
+  after leaving range, engagement-only confirmation not granting live
+  position tracking, the firing-disclosure reveal window opening and
+  expiring, and the battle view hiding/freezing unconfirmed and
+  out-of-range enemy squads.
+- Any new script declaring `class_name` needs a one-time
+  `godot --headless --path . --import` before it resolves as a global type
+  in other scripts — otherwise headless runs fail with "Could not find type
+  ... in the current scope" even though the class compiles fine on its own.
 - Godot 4.7.1 is installed at
   `C:/Users/koyu9/local/godot/Godot_v4.7.1-stable_win64_console.exe` (not on
   PATH). All state/production tests, the strategic-map smoke test, and a

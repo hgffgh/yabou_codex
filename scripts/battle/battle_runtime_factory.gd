@@ -91,6 +91,7 @@ func _build_side(state: BattleRuntimeState, ids: Array[StringName], campaign: Ca
 		battle_squad.spawn_position = spawn + Vector3(0.0, float(index) * SQUAD_SPACING, 0.0)
 		battle_squad.world_position = battle_squad.spawn_position
 		battle_squad.destination = battle_squad.spawn_position
+		battle_squad.last_known_world_position = battle_squad.spawn_position
 		battle_squad.retreat_region_id = strategic.move_origin_region_id if attacker else &""
 		battle_squad.policy = strategic.battle_policy
 		battle_squad.intel_revision = strategic.intel_revision
@@ -115,15 +116,23 @@ func _build_side(state: BattleRuntimeState, ids: Array[StringName], campaign: Ca
 				battle_unit.max_en = unit_def.max_en
 			var pilot_def := state.pilot_defs.get(strategic_unit.pilot_id) as PilotDef
 			if pilot_def != null:
-				battle_unit.shooting = pilot_def.initial_shooting
-				battle_unit.melee = pilot_def.initial_melee
-				battle_unit.defense = pilot_def.initial_defense
-				battle_unit.reaction = pilot_def.initial_reaction
-				battle_unit.command = pilot_def.initial_command
+				var pilot_state := campaign.get_pilot(strategic_unit.pilot_id)
+				var level := pilot_state.level if pilot_state != null else pilot_def.initial_level
+				battle_unit.shooting = _effective_stat(pilot_def.initial_shooting, pilot_def.growth_shooting, level)
+				battle_unit.melee = _effective_stat(pilot_def.initial_melee, pilot_def.growth_melee, level)
+				battle_unit.defense = _effective_stat(pilot_def.initial_defense, pilot_def.growth_defense, level)
+				battle_unit.reaction = _effective_stat(pilot_def.initial_reaction, pilot_def.growth_reaction, level)
+				battle_unit.command = _effective_stat(pilot_def.initial_command, pilot_def.growth_command, level)
 			if strategic.leader_pilot_id == strategic_unit.pilot_id and not strategic_unit.pilot_id.is_empty():
 				battle_squad.leader_unit_id = unit_id
 				battle_squad.leader_command = battle_unit.command
 			state.unit_states_by_id[unit_id] = battle_unit
+
+## STRATEGY_DETAIL_SPECIFICATION.md section 5.5: fixed per-level growth, no
+## randomness, permanent stats capped at 200 (temporary effects may exceed
+## it, but nothing here produces temporary effects).
+func _effective_stat(initial: int, growth: int, level: int) -> int:
+	return mini(GameConstants.PILOT_STAT_CAP, initial + growth * (level - 1))
 
 func _sorted_ids(value: Variant) -> Array[StringName]:
 	var result: Array[StringName] = []

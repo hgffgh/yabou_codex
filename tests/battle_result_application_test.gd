@@ -21,9 +21,13 @@ func _initialize() -> void:
 
 ## A destroyed unit's fate depends on which side it belonged to: the
 ## winner's own losses are "recovered" (kept, unassigned, HP 0), the loser's
-## losses are captured at a deterministic ~10% rate and otherwise lost
-## outright (deleted). Ten loser losses guarantees exactly one capture,
-## since GameConstants.CAPTURE_ENEMY_UNIT_PCT == 0.10.
+## losses are each independently rolled for capture at
+## GameConstants.CAPTURE_ENEMY_UNIT_PCT (10%) via the battle's own
+## deterministic RNG stream, and otherwise lost outright (deleted). This
+## battle is built with a fixed seed and no prior combat consumes any rolls,
+## so the resulting captured/lost split is a reproducible regression check,
+## not a guaranteed-by-formula outcome — a different seed could split the
+## same ten losses differently.
 func _test_recovered_captured_lost_outcomes() -> void:
 	game_state.start_new_game(&"nova_republic")
 	var survivor: Dictionary = game_state.rollout_new_unit(&"nova_scout", &"nova_republic", &"crimson_border")
@@ -77,10 +81,12 @@ func _test_recovered_captured_lost_outcomes() -> void:
 	_check(game_state.campaign_runtime.get_squad(survivor.squad.squad_id) != null,
 		"surviving attacker squad was deleted")
 
+	_check(battle.result.captured_unit_ids.size() + battle.result.lost_unit_ids.size() == 10,
+		"captured (%d) and lost (%d) unit counts did not add up to all ten defender losses" % [battle.result.captured_unit_ids.size(), battle.result.lost_unit_ids.size()])
+	# Fixed seed 1, no prior combat consuming rolls: reproducible regression
+	# check on this exact battle, not a guaranteed-by-formula split.
 	_check(battle.result.captured_unit_ids.size() == 1,
-		"expected exactly one captured unit out of ten losses, got %d" % battle.result.captured_unit_ids.size())
-	_check(battle.result.lost_unit_ids.size() == 9,
-		"expected exactly nine lost units, got %d" % battle.result.lost_unit_ids.size())
+		"expected exactly one captured unit out of ten losses for this fixed seed, got %d" % battle.result.captured_unit_ids.size())
 	if battle.result.captured_unit_ids.size() == 1:
 		var captured_id: StringName = battle.result.captured_unit_ids[0]
 		var captured_unit: UnitInstanceState = game_state.campaign_runtime.get_unit(captured_id)
@@ -98,6 +104,11 @@ func _test_recovered_captured_lost_outcomes() -> void:
 			)
 	for unit_id: StringName in battle.result.lost_unit_ids:
 		_check(game_state.campaign_runtime.get_unit(unit_id) == null, "lost unit '%s' was not fully removed" % unit_id)
+
+	_check(battle.result.injured_pilot_ids.is_empty(),
+		"no named pilots participated, but injured_pilot_ids was not empty")
+	_check(battle.result.pilot_exp.is_empty(),
+		"no named pilots participated, but pilot_exp was not empty")
 
 	var validation_errors: PackedStringArray = game_state.campaign_runtime.validate(game_state.master_data, game_state.region_defs)
 	_check(validation_errors.is_empty(), "campaign state failed validation after battle outcomes: %s" % validation_errors)

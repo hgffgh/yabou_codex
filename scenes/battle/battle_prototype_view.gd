@@ -231,6 +231,7 @@ func _build_squad_visuals() -> void:
 		var root_node := Node3D.new()
 		root_node.name = String(squad.squad_id)
 		root_node.position = Vector3(squad.world_position.x, 0.0, squad.world_position.y)
+		root_node.visible = squad.faction_id == game_state.player_faction_id
 		world_root.add_child(root_node)
 		squad_visuals[squad.squad_id] = root_node
 		var ring := MeshInstance3D.new()
@@ -310,14 +311,29 @@ func _process(delta: float) -> void:
 			squad.world_position += offset.normalized() * minf(offset.length(), _squad_speed(squad) * scaled_delta)
 		squad.world_position.x = clampf(squad.world_position.x, -580.0, 580.0)
 		squad.world_position.y = clampf(squad.world_position.y, -430.0, 430.0)
-		var visual := squad_visuals.get(squad.squad_id) as Node3D
-		if visual != null: visual.position = Vector3(squad.world_position.x, 0, squad.world_position.y)
+		_sync_intel_visibility(squad)
 	battle.advance_time(delta)
 	_sync_combat_events()
 	_sync_unit_status()
 	_sync_control_point_visuals()
 	status_label.text = "経過 %.1f / 300秒  x%.0f  選択: %s" % [battle.elapsed_world_sec, battle.time_scale, selected_squad_id]
 	if battle.has_unconfirmed_engagement(): _show_prebattle()
+
+## COMBAT_DETAIL_SPECIFICATION.md section 24: an unconfirmed enemy squad's
+## icon is not shown at all. Once confirmed (sticky for the battle), it
+## renders at its live position while currently sensed, and freezes at
+## last_known_world_position (a stale "last confirmed" marker) once it
+## leaves sensor range and the firing-disclosure window has elapsed.
+func _sync_intel_visibility(squad: BattleSquadState) -> void:
+	var visual := squad_visuals.get(squad.squad_id) as Node3D
+	if visual == null:
+		return
+	var is_own_squad: bool = squad.faction_id == game_state.player_faction_id
+	visual.visible = is_own_squad or squad.intel_confirmed
+	if is_own_squad or squad.currently_sensed:
+		visual.position = Vector3(squad.world_position.x, 0, squad.world_position.y)
+	elif squad.intel_confirmed:
+		visual.position = Vector3(squad.last_known_world_position.x, 0, squad.last_known_world_position.y)
 	if battle.result != null:
 		_show_battle_result()
 
@@ -331,10 +347,14 @@ func _show_prebattle() -> void:
 		var power := BattlePowerEstimator.squad_power(battle, squad)
 		if squad.faction_id == game_state.player_faction_id: player_power += power
 		else: enemy_power += power
-		lines.append("%s  %s  方針:%d" % [side, squad.squad_id, squad.policy])
+		var unconfirmed_enemy: bool = squad.faction_id != game_state.player_faction_id and not squad.intel_confirmed
+		lines.append("%s  %s  方針:%s" % [side, squad.squad_id if not unconfirmed_enemy else "未確認部隊", "?" if unconfirmed_enemy else str(squad.policy)])
 		for unit_id: StringName in squad.unit_instance_ids:
 			var unit := battle.unit_states_by_id[unit_id] as BattleUnitState
-			lines.append("  SLOT %d  HP %d/%d  EN %d/%d" % [unit.slot_index + 1, unit.current_hp, unit.max_hp, unit.current_en, unit.max_en])
+			if unconfirmed_enemy:
+				lines.append("  SLOT %d  未確認" % [unit.slot_index + 1])
+			else:
+				lines.append("  SLOT %d  HP %d/%d  EN %d/%d" % [unit.slot_index + 1, unit.current_hp, unit.max_hp, unit.current_en, unit.max_en])
 	lines.append("\n概略戦力: %s" % BattlePowerEstimator.rating(player_power, enemy_power))
 	lines.append("命中率・ダメージ幅・乱数結果は非表示です。")
 	prebattle_summary.text = "\n".join(lines)

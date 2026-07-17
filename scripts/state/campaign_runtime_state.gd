@@ -9,6 +9,7 @@ const PRODUCTION_JOB_ID_PREFIX := "production_job_"
 
 var units_by_id: Dictionary = {}
 var squads_by_id: Dictionary = {}
+var pilots_by_id: Dictionary = {}
 var production_jobs_by_id: Dictionary = {}
 var production_queues_by_facility_id: Dictionary = {}
 var next_unit_serial: int = 1
@@ -19,6 +20,7 @@ var next_production_job_serial: int = 1
 func reset() -> void:
 	units_by_id.clear()
 	squads_by_id.clear()
+	pilots_by_id.clear()
 	production_jobs_by_id.clear()
 	production_queues_by_facility_id.clear()
 	next_unit_serial = 1
@@ -136,6 +138,85 @@ func register_squad(squad: SquadState) -> bool:
 			return false
 	squads_by_id[squad.squad_id] = squad
 	return true
+
+
+func get_pilot(pilot_id: StringName) -> PilotState:
+	return pilots_by_id.get(pilot_id) as PilotState
+
+
+func register_pilot(pilot: PilotState) -> bool:
+	if pilot == null or pilot.pilot_id.is_empty() or pilots_by_id.has(pilot.pilot_id):
+		return false
+	pilots_by_id[pilot.pilot_id] = pilot
+	return true
+
+
+## Assigns a named pilot to a unit, per STRATEGY_DETAIL_SPECIFICATION.md
+## section 5: placing a named pilot silently displaces whatever generic or
+## named pilot currently crews that unit (and, if this pilot was already
+## flying a different unit, that unit reverts to a generic pilot). Injured
+## pilots cannot be assigned. Region/area continuity for a pilot switching
+## machines is not enforced — PilotState does not track a location
+## independent of its assigned unit.
+func assign_pilot_to_unit(pilot_id: StringName, unit_instance_id: StringName) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var pilot := get_pilot(pilot_id)
+	var unit := get_unit(unit_instance_id)
+	if pilot == null:
+		errors.append("pilot assignment: pilot_id '%s' does not resolve" % pilot_id)
+	if unit == null:
+		errors.append("pilot assignment: unit_instance_id '%s' does not resolve" % unit_instance_id)
+	if not errors.is_empty():
+		return errors
+	if pilot.is_injured():
+		errors.append("pilot assignment: pilot is injured")
+	if unit.owner_faction_id != pilot.owner_faction_id:
+		errors.append("pilot assignment: unit is not owned by the pilot's faction")
+	elif unit.condition != GameEnums.UnitCondition.ACTIVE:
+		errors.append("pilot assignment: unit is not active")
+	if not errors.is_empty():
+		return errors
+	if pilot.assigned_unit_instance_id == unit_instance_id:
+		return errors
+	if not pilot.assigned_unit_instance_id.is_empty():
+		var previous := get_unit(pilot.assigned_unit_instance_id)
+		if previous != null:
+			previous.pilot_id = &""
+			_repair_squad_leader_for_unit(previous)
+	if not unit.pilot_id.is_empty():
+		var displaced := get_pilot(unit.pilot_id)
+		if displaced != null:
+			displaced.assigned_unit_instance_id = &""
+	unit.pilot_id = pilot_id
+	pilot.assigned_unit_instance_id = unit_instance_id
+	_repair_squad_leader_for_unit(unit)
+	return errors
+
+
+## Reverts a named pilot's unit to a generic pilot. The pilot itself stays
+## on its faction's roster, available for reassignment.
+func unassign_pilot(pilot_id: StringName) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var pilot := get_pilot(pilot_id)
+	if pilot == null:
+		errors.append("pilot assignment: pilot_id '%s' does not resolve" % pilot_id)
+		return errors
+	if pilot.assigned_unit_instance_id.is_empty():
+		return errors
+	var unit := get_unit(pilot.assigned_unit_instance_id)
+	if unit != null and unit.pilot_id == pilot_id:
+		unit.pilot_id = &""
+		_repair_squad_leader_for_unit(unit)
+	pilot.assigned_unit_instance_id = &""
+	return errors
+
+
+func _repair_squad_leader_for_unit(unit: UnitInstanceState) -> void:
+	if unit == null or unit.squad_id.is_empty():
+		return
+	var squad := get_squad(unit.squad_id)
+	if squad != null:
+		_repair_squad_leader(squad)
 
 
 func remove_unassigned_unit(instance_id: StringName) -> bool:
@@ -430,6 +511,32 @@ func validate(
 		errors.append("campaign: next_production_job_serial must be at least 1")
 	if next_production_job_serial <= _maximum_serial(production_jobs_by_id, PRODUCTION_JOB_ID_PREFIX):
 		errors.append("campaign: next_production_job_serial must exceed existing generated production job IDs")
+	for pilot_key: Variant in pilots_by_id:
+		var pilot := pilots_by_id[pilot_key] as PilotState
+		if pilot == null or pilot.pilot_id != pilot_key or StringName(pilot_key).is_empty():
+			errors.append("campaign.pilot_states: invalid pilot '%s'" % pilot_key)
+			continue
+		if pilot.owner_faction_id.is_empty() or not registry.factions.has(pilot.owner_faction_id):
+			errors.append("campaign.pilot_states[%s]: owner_faction_id does not resolve" % pilot_key)
+		if not registry.pilots.has(pilot.pilot_id):
+			errors.append("campaign.pilot_states[%s]: pilot_id does not resolve to a PilotDef" % pilot_key)
+		if pilot.level < 1 or pilot.level > GameConstants.PILOT_LEVEL_CAP:
+			errors.append("campaign.pilot_states[%s]: level must be in 1..%d" % [pilot_key, GameConstants.PILOT_LEVEL_CAP])
+		if pilot.current_exp < 0:
+			errors.append("campaign.pilot_states[%s]: current_exp must not be negative" % pilot_key)
+		if pilot.injury_turns_remaining < 0:
+			errors.append("campaign.pilot_states[%s]: injury_turns_remaining must not be negative" % pilot_key)
+		if not pilot.assigned_unit_instance_id.is_empty():
+			var assigned_unit := units_by_id.get(pilot.assigned_unit_instance_id) as UnitInstanceState
+			if assigned_unit == null or assigned_unit.pilot_id != pilot.pilot_id:
+				errors.append("campaign.pilot_states[%s]: assigned_unit_instance_id back-reference is inconsistent" % pilot_key)
+	for unit_key: Variant in units_by_id:
+		var pilot_owner := units_by_id[unit_key] as UnitInstanceState
+		if pilot_owner == null or pilot_owner.pilot_id.is_empty():
+			continue
+		var owning_pilot := pilots_by_id.get(pilot_owner.pilot_id) as PilotState
+		if owning_pilot == null or owning_pilot.assigned_unit_instance_id != pilot_owner.instance_id:
+			errors.append("units[%s]: pilot_id '%s' does not resolve to a matching PilotState" % [unit_key, pilot_owner.pilot_id])
 	var queued_jobs := {}
 	for facility_key: Variant in production_queues_by_facility_id:
 		var queue := production_queues_by_facility_id[facility_key] as ProductionQueueState
@@ -521,6 +628,11 @@ func to_dict() -> Dictionary:
 		var squad := squads_by_id[key] as SquadState
 		if squad != null:
 			squad_states.append(squad.to_dict())
+	var pilot_states: Array[Dictionary] = []
+	for key: Variant in _sorted_keys(pilots_by_id):
+		var pilot := pilots_by_id[key] as PilotState
+		if pilot != null:
+			pilot_states.append(pilot.to_dict())
 	var production_jobs: Array[Dictionary] = []
 	for key: Variant in _sorted_keys(production_jobs_by_id):
 		var job := production_jobs_by_id[key] as ProductionJobState
@@ -537,6 +649,7 @@ func to_dict() -> Dictionary:
 		"next_production_job_serial": next_production_job_serial,
 		"unit_states": unit_states,
 		"squad_states": squad_states,
+		"pilot_states": pilot_states,
 		"production_jobs": production_jobs,
 		"production_queues": production_queues,
 	}
@@ -576,6 +689,22 @@ static func from_dict(data: Dictionary) -> Dictionary:
 				state.squads_by_id[squad.squad_id] = squad
 	else:
 		errors.append("campaign.squad_states must be an Array")
+
+	var pilot_values: Variant = data.get("pilot_states", [])
+	if pilot_values is Array:
+		for value: Variant in pilot_values:
+			if not value is Dictionary:
+				errors.append("campaign.pilot_states: entry must be a Dictionary")
+				continue
+			var pilot := PilotState.from_dict(value)
+			if pilot.pilot_id.is_empty():
+				errors.append("campaign.pilot_states: pilot_id must not be empty")
+			elif state.pilots_by_id.has(pilot.pilot_id):
+				errors.append("campaign.pilot_states: duplicate pilot_id '%s'" % pilot.pilot_id)
+			else:
+				state.pilots_by_id[pilot.pilot_id] = pilot
+	else:
+		errors.append("campaign.pilot_states must be an Array")
 
 	var job_values: Variant = data.get("production_jobs", [])
 	if job_values is Array:

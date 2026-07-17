@@ -48,6 +48,12 @@ static func _advance_step(battle: BattleRuntimeState, delta_sec: float) -> void:
 			attacker.defending = false
 			attacker.current_en -= (attack.weapon as WeaponDef).en_cost
 			attacker.post_action_delay_sec = (attack.weapon as WeaponDef).post_action_delay_sec
+			# COMBAT_DETAIL_SPECIFICATION.md section 24: firing from outside
+			# sensor range discloses the attacker's current position for 5
+			# battle-seconds, ignoring obstacles.
+			var attacking_squad := battle.squad_states_by_id[attacker.squad_id] as BattleSquadState
+			if not attacking_squad.currently_sensed:
+				attacking_squad.revealed_until_world_sec = battle.elapsed_world_sec + 5.0
 			attacks.append(attack)
 		else:
 			attacker.defending = false
@@ -56,14 +62,24 @@ static func _advance_step(battle: BattleRuntimeState, delta_sec: float) -> void:
 			attacker.post_action_delay_sec = skill.post_action_delay_sec
 			supports.append(support)
 	var damage_by_target := {}
+	var attackers_by_target: Dictionary = {}
 	for attack: Dictionary in attacks:
 		for target_id: StringName in attack.target_ids:
 			var total_damage := _resolve_attack(battle, attack, target_id)
 			damage_by_target[target_id] = int(damage_by_target.get(target_id, 0)) + total_damage
+			if total_damage > 0:
+				var contributors: Array = attackers_by_target.get(target_id, [])
+				contributors.append(attack.attacker_id)
+				attackers_by_target[target_id] = contributors
 	for target_id: StringName in damage_by_target:
 		var target := battle.unit_states_by_id[target_id] as BattleUnitState
 		target.current_hp = maxi(0, target.current_hp - int(damage_by_target[target_id]))
-		if target.current_hp == 0: target.destroyed_this_battle = true
+		if target.current_hp == 0:
+			target.destroyed_this_battle = true
+			for attacker_id: Variant in attackers_by_target.get(target_id, []):
+				var attacker_unit := battle.unit_states_by_id.get(attacker_id) as BattleUnitState
+				if attacker_unit != null:
+					attacker_unit.exp_earned += GameConstants.PILOT_EXP_ENEMY_DESTROYED
 	for support: Dictionary in supports:
 		_apply_support(battle, support)
 	_finalize_annihilation(battle)
@@ -133,6 +149,10 @@ static func _apply_support(battle: BattleRuntimeState, action: Dictionary) -> vo
 		amount = mini(target.max_en - target.current_en, skill.transfer_en)
 		target.current_en += amount
 	else: return
+	# STRATEGY_DETAIL_SPECIFICATION.md section 5.3: only an actual HP/EN
+	# increase grants support-success EXP (a no-op repair/transfer earns none).
+	if amount > 0:
+		source.exp_earned += GameConstants.PILOT_EXP_SUPPORT_SUCCESS
 	battle.combat_events.append({"type": &"support", "source_unit_id": source.unit_instance_id, "target_unit_id": target.unit_instance_id, "skill_id": skill.id, "amount": amount, "action_type": skill.action_type})
 
 static func _prepare_attack(battle: BattleRuntimeState, attacker_id: StringName) -> Dictionary:
@@ -170,7 +190,7 @@ static func _select_target(battle: BattleRuntimeState, attacker_squad: BattleSqu
 				if target.current_hp > 0 and target.slot_index >= 3: candidates.append(target)
 	if candidates.is_empty(): return &""
 	if weapon.target_rule == GameEnums.TargetRule.RANDOM:
-		return candidates[_roll(battle, candidates.size())].unit_instance_id
+		return candidates[roll(battle, candidates.size())].unit_instance_id
 	candidates.sort_custom(func(a: BattleUnitState, b: BattleUnitState) -> bool: return _target_before(battle, a, b, weapon.target_rule))
 	return candidates[0].unit_instance_id
 
@@ -230,7 +250,7 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 		var attack_command := (float(_active_leader_command(battle, attacker_squad)) - 100.0) * 0.1
 		var defense_command := (float(_active_leader_command(battle, target_squad)) - 100.0) * 0.1
 		var accuracy := clampi(roundi(float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command - (10.0 if target.defending else 0.0)), 5, 95)
-		var hit := _roll(battle, 100) < accuracy
+		var hit := roll(battle, 100) < accuracy
 		var damage := 0
 		var critical := false
 		if hit:
@@ -240,9 +260,9 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 			var effective_armor := maxf(0.0, float(target_def.armor) + pilot_armor + (20.0 if target.defending else 0.0) - float(weapon.penetration))
 			var base_damage := maxf(hit_power * 0.05, float(attacker_def.firepower) + pilot_firepower + hit_power - effective_armor)
 			base_damage *= _attribute_multiplier(target_def, weapon.damage_attribute)
-			base_damage *= float(90 + _roll(battle, 21)) / 100.0
+			base_damage *= float(90 + roll(battle, 21)) / 100.0
 			var critical_rate := clampi(weapon.base_critical_pct + floori(float(attacker.reaction - 100) / 10.0), 0, 50)
-			critical = _roll(battle, 100) < critical_rate
+			critical = roll(battle, 100) < critical_rate
 			if critical: base_damage *= 1.5
 			damage = roundi(base_damage)
 			total += damage
@@ -261,7 +281,7 @@ static func _attribute_multiplier(unit_def: UnitDef, attribute: int) -> float:
 		GameEnums.DamageAttribute.MELEE: return unit_def.melee_damage_multiplier
 	return 1.0
 
-static func _roll(battle: BattleRuntimeState, upper: int) -> int:
+static func roll(battle: BattleRuntimeState, upper: int) -> int:
 	battle.rng_state = int((battle.rng_state * 1664525 + 1013904223) & 0x7fffffff)
 	return battle.rng_state % upper
 

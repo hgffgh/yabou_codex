@@ -34,6 +34,35 @@ const UNIT_PRODUCTION_POWER: Dictionary = {
 ## capture_enemy_unit_pct default; not yet promoted to a CampaignConfig field.
 const CAPTURE_ENEMY_UNIT_PCT: float = 0.10
 
+## STRATEGY_DETAIL_SPECIFICATION.md section 5.3/5.5/5.7: named-pilot level
+## cap, permanent-stat cap, and destroyed-pilot injury duration in weeks.
+const PILOT_LEVEL_CAP: int = 50
+const PILOT_STAT_CAP: int = 200
+const PILOT_INJURY_TURNS: int = 3
+
+## Base EXP per source, before the (currently unimplemented) permanent
+## profile EXP bonus. section 5.3's award table.
+const PILOT_EXP_ROUND_PARTICIPATION: int = 50
+const PILOT_EXP_ENEMY_DESTROYED: int = 50
+const PILOT_EXP_SUPPORT_SUCCESS: int = 20
+const PILOT_EXP_BATTLE_VICTORY: int = 50
+const PILOT_EXP_HQ_CAPTURE_VICTORY: int = 100
+
+## EXP required to advance from `level` to `level + 1`, by section 5.3's
+## table. Returns 0 at or above the level cap (no further level exists).
+static func pilot_exp_to_next_level(level: int) -> int:
+	if level >= PILOT_LEVEL_CAP:
+		return 0
+	if level <= 10:
+		return 250
+	if level <= 20:
+		return 500
+	if level <= 30:
+		return 750
+	if level <= 40:
+		return 1000
+	return 1500
+
 const NORMAL_SENSOR_RANGE_M: float = 150.0
 const RECON_SENSOR_RANGE_M: float = 300.0
 const ALLOWED_DAMAGE_MULTIPLIERS: Array[float] = [0.50, 0.75, 1.00, 1.25, 1.50]

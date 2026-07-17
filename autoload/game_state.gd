@@ -74,6 +74,7 @@ func start_new_game(chosen_player_faction_id: StringName) -> void:
 	for id in region_defs:
 		regions[id] = Region.new(region_defs[id])
 	_seed_initial_squads()
+	_seed_initial_pilots()
 	recompute_all_supply_networks()
 
 	turn_advanced.emit(turn_number)
@@ -222,41 +223,84 @@ func apply_battle_result(battle: BattleRuntimeState) -> PackedStringArray:
 	battle.applied_to_campaign = true
 	return errors
 
-## Resolves each destroyed unit's fate. The winner's own losses are
-## "recovered" (kept as an unassigned DESTROYED_RECOVERED record, salvage
-## for a future rebuild feature); the loser's losses are mostly permanent,
-## except for a deterministic ~10% that the winner captures as a fresh,
-## barely-operational one-unit squad. Selection uses a fractional-carry
-## accumulator (same technique as control-point HP/EN recovery) rather than
-## RNG, so results stay fully deterministic.
+## Applies each participating pilot's accumulated battle EXP (destroy,
+## support-success, round-participation, and victory/HQ-capture credit),
+## then resolves every destroyed unit's fate. COMBAT_DETAIL_SPECIFICATION.md
+## section 18 / STRATEGY_DETAIL_SPECIFICATION.md section 5.7: any destroyed
+## unit's named pilot is injured for three turns regardless of which side
+## won. The winner's own losses are "recovered" (kept as an unassigned
+## DESTROYED_RECOVERED record, salvage for a future rebuild feature); the
+## loser's losses are mostly permanent, except for a probabilistic ~10%
+## roll per capturable destroyed unit (COMBAT_DETAIL_SPECIFICATION.md
+## section 18: a 10% capture roll per destroyed enemy unit),
+## using the battle's own deterministic RNG stream so results stay
+## reproducible from the same seed. Units with UnitDef.capture_allowed ==
+## false are never eligible (section 18: 0% for non-capturable units).
 func _apply_battle_unit_outcomes(battle: BattleRuntimeState) -> void:
+	_apply_battle_pilot_exp(battle)
 	var winner_id := battle.result.winner_faction_id
-	var capture_accumulator := 0.0
 	for unit_id: StringName in battle.result.destroyed_unit_ids:
 		var unit := campaign_runtime.get_unit(unit_id)
 		if unit == null:
 			continue
+		var pilot_id := unit.pilot_id
 		if unit.owner_faction_id == winner_id:
 			campaign_runtime.remove_unit_from_squad(unit_id)
 			unit.condition = GameEnums.UnitCondition.DESTROYED_RECOVERED
 			unit.current_hp = 0
 			unit.current_en = 0
+			unit.pilot_id = &""
 			battle.result.recovered_unit_ids.append(unit_id)
+		else:
+			var unit_def := master_data.units.get(unit.unit_def_id) as UnitDef
+			var captured := false
+			if unit_def != null and unit_def.capture_allowed:
+				var capture_roll := BattleCombatSystem.roll(battle, 100)
+				if capture_roll < int(round(GameConstants.CAPTURE_ENEMY_UNIT_PCT * 100.0)):
+					var capture_result := campaign_runtime.capture_unit(unit_id, winner_id, battle.region_id, master_data, region_defs)
+					if capture_result.errors.is_empty():
+						battle.result.captured_unit_ids.append(unit_id)
+						captured = true
+					else:
+						push_error("battle result: capture failed for '%s': %s" % [unit_id, capture_result.errors])
+			if not captured:
+				campaign_runtime.remove_unit_from_squad(unit_id)
+				campaign_runtime.units_by_id.erase(unit_id)
+				battle.result.lost_unit_ids.append(unit_id)
+		_apply_pilot_injury(pilot_id, battle.result)
+
+## STRATEGY_DETAIL_SPECIFICATION.md section 5.3: base EXP is summed on
+## BattleUnitState.exp_earned throughout the battle; the permanent profile
+## EXP bonus (achievements) is applied last with ceil(). No achievement/
+## profile system exists yet, so that bonus is a documented 0.0 placeholder.
+func _apply_battle_pilot_exp(battle: BattleRuntimeState) -> void:
+	const PERMANENT_EXP_BONUS_PCT := 0.0
+	for unit_id: StringName in battle.unit_states_by_id:
+		var battle_unit := battle.unit_states_by_id[unit_id] as BattleUnitState
+		if battle_unit.pilot_id.is_empty() or battle_unit.exp_earned <= 0:
 			continue
-		capture_accumulator += GameConstants.CAPTURE_ENEMY_UNIT_PCT
-		var captured := false
-		if capture_accumulator >= 1.0 - 0.000001:
-			var result := campaign_runtime.capture_unit(unit_id, winner_id, battle.region_id, master_data, region_defs)
-			if result.errors.is_empty():
-				capture_accumulator -= 1.0
-				battle.result.captured_unit_ids.append(unit_id)
-				captured = true
-			else:
-				push_error("battle result: capture failed for '%s': %s" % [unit_id, result.errors])
-		if not captured:
-			campaign_runtime.remove_unit_from_squad(unit_id)
-			campaign_runtime.units_by_id.erase(unit_id)
-			battle.result.lost_unit_ids.append(unit_id)
+		var pilot := campaign_runtime.get_pilot(battle_unit.pilot_id)
+		if pilot == null:
+			continue
+		var final_exp := ceili(float(battle_unit.exp_earned) * (1.0 + PERMANENT_EXP_BONUS_PCT))
+		pilot.current_exp += final_exp
+		battle.result.pilot_exp[battle_unit.pilot_id] = int(battle.result.pilot_exp.get(battle_unit.pilot_id, 0)) + final_exp
+		while pilot.level < GameConstants.PILOT_LEVEL_CAP:
+			var required := GameConstants.pilot_exp_to_next_level(pilot.level)
+			if required <= 0 or pilot.current_exp < required:
+				break
+			pilot.current_exp -= required
+			pilot.level += 1
+
+func _apply_pilot_injury(pilot_id: StringName, result: BattleResultState) -> void:
+	if pilot_id.is_empty():
+		return
+	var pilot := campaign_runtime.get_pilot(pilot_id)
+	if pilot == null:
+		return
+	pilot.injury_turns_remaining = GameConstants.PILOT_INJURY_TURNS
+	pilot.assigned_unit_instance_id = &""
+	result.injured_pilot_ids.append(pilot_id)
 
 ## Live, combat-capable squad IDs a faction currently has sitting in a
 ## region, re-derived fresh from campaign_runtime. Used to resolve a
@@ -335,6 +379,21 @@ func advance_repairs_for_faction(faction_id: StringName) -> Array[StringName]:
 			completed.append(instance_id)
 	return completed
 
+## STRATEGY_DETAIL_SPECIFICATION.md section 5.7: a destroyed named pilot
+## cannot sortie for three of that faction's own turns.
+func advance_pilot_injuries_for_faction(faction_id: StringName) -> Array[StringName]:
+	var recovered: Array[StringName] = []
+	var pilot_ids := campaign_runtime.pilots_by_id.keys()
+	pilot_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for pilot_id: StringName in pilot_ids:
+		var pilot := campaign_runtime.get_pilot(pilot_id)
+		if pilot == null or pilot.owner_faction_id != faction_id or pilot.injury_turns_remaining <= 0:
+			continue
+		pilot.injury_turns_remaining -= 1
+		if pilot.injury_turns_remaining == 0:
+			recovered.append(pilot_id)
+	return recovered
+
 func rollout_new_unit(
 	unit_def_id: StringName,
 	owner_faction_id: StringName,
@@ -379,6 +438,42 @@ func _seed_initial_squads() -> void:
 				var result := rollout_new_unit(unit_id, faction_id, faction_def.starting_region_id, tr(String(unit_def.display_name_key)))
 				if not result.errors.is_empty():
 					push_error("Initial squad rollout failed: %s" % result.errors)
+
+## Transitional deterministic assignment until formation UI exposes pilot
+## roster management; mirrors _seed_initial_squads' temporary loadout. Each
+## named pilot claims the first still-generic-piloted unit for their
+## faction, at PilotDef.initial_level.
+func _seed_initial_pilots() -> void:
+	var pilot_ids := master_data.pilots.keys()
+	pilot_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for pilot_id: StringName in pilot_ids:
+		var pilot_def := master_data.pilots[pilot_id] as PilotDef
+		if pilot_def == null:
+			continue
+		var pilot := PilotState.new()
+		pilot.pilot_id = pilot_id
+		pilot.owner_faction_id = pilot_def.faction_id
+		pilot.level = clampi(pilot_def.initial_level, 1, GameConstants.PILOT_LEVEL_CAP)
+		pilot.current_exp = 0
+		pilot.injury_turns_remaining = 0
+		pilot.available = true
+		pilot.joined = true
+		if not campaign_runtime.register_pilot(pilot):
+			continue
+		var unit_id := _first_generic_piloted_unit_for_faction(pilot_def.faction_id)
+		if not unit_id.is_empty():
+			var assign_errors := campaign_runtime.assign_pilot_to_unit(pilot_id, unit_id)
+			if not assign_errors.is_empty():
+				push_error("Initial pilot assignment failed for %s: %s" % [pilot_id, assign_errors])
+
+func _first_generic_piloted_unit_for_faction(faction_id: StringName) -> StringName:
+	var unit_ids := campaign_runtime.units_by_id.keys()
+	unit_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for unit_id: StringName in unit_ids:
+		var unit := campaign_runtime.get_unit(unit_id)
+		if unit != null and unit.owner_faction_id == faction_id and unit.pilot_id.is_empty():
+			return unit_id
+	return &""
 
 func production_facility_ids_for_region(region_id: StringName) -> Array[StringName]:
 	var result: Array[StringName] = []
