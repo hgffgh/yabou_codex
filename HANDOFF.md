@@ -765,6 +765,106 @@ still missing (art assets, VN-style playback controls, the recap screen):
   isn't built; the data it would read (`ProfileState.viewed_event_ids`) is
   in place and already covered by `event_system_test.gd`.
 
+Four smaller gaps that had accumulated as deferrals across earlier milestones
+are now closed:
+
+- **AI behavior profiles** (DATA_DEFINITION.md section 5's
+  `DifficultyDef.ai_profile_id`, previously schema-only): a new
+  `AiProfileDef` (`res://data/ai_profiles/`: `ai_easy`/`ai_normal`/`ai_hard` —
+  named distinctly from the difficulty ids they pair with, since
+  `MasterDataValidator`'s global ID-uniqueness check spans every master-data
+  category) carries `aggression_multiplier`, `production_queue_length`, and
+  `research_reserve`. `AiController.ai_profile()` resolves the current
+  difficulty's profile (falling back to a neutral `AiProfileDef.new()` for an
+  unresolved id, same pattern as `GameState.current_difficulty()`) and
+  threads it through `_decide_research` (replaces the old hardcoded
+  `RESEARCH_RESERVE` constant), `_decide_production` (replaces
+  `MAX_QUEUE_LENGTH`), and `_best_squad_destination` (divides the existing
+  `FactionDef.ai_aggression`-derived required power ratio by
+  `aggression_multiplier`, on top of that same formula's pre-existing
+  friendship term and its floor of 1.0 — a more aggressive profile still
+  never attacks below parity power). AI difficulty was previously only
+  "harder numbers" (income/HP/firepower/accuracy multipliers); it's now also
+  a materially different AI posture.
+- **The permanent tech-candidate pool** (STRATEGY_DETAIL_SPECIFICATION.md
+  section 7.2's "恒久アンロック済み候補", explicitly deferred when
+  `TechTreeGenerator` first shipped): new `ProfileState.
+  unlocked_tech_candidate_ids`, grown by `GameState.
+  unlock_tech_candidate_from_research` whenever the *player's own* faction
+  finishes researching any tech (`TurnManager._advance_research`) — AI
+  research completions never touch it. `TechTreeGenerator.generate_for_faction`
+  gained a 4th parameter (`unlocked_candidate_ids`, default empty) and its
+  non-mandatory draw pool is now restricted to `def.origin_faction_id ==
+  faction_id OR unlocked_candidate_ids.has(tech_id)` — previously *every*
+  non-mandatory tech was eligible for every faction's draw regardless of
+  origin (also an explicit, documented tradeoff at the time). A fresh
+  profile therefore only draws each faction's own-origin techs; playing
+  more campaigns and researching other factions' techs (typically received
+  via `Diplomacy.gift_tech` first, then researched) is what permanently
+  grows the pool for every future campaign and faction. This is a real
+  behavior change, not just additive: `tech_tree_test.gd`'s existing
+  tier-coverage assertion happened to still hold unchanged only because the
+  current 10-tech sample dataset's own-origin techs already cover all 5
+  tiers for both factions by coincidence (crimson_empire in particular has
+  exactly one own-origin non-mandatory tech per tier) — a larger future
+  dataset without that coincidence would need `unlocked_tech_candidate_ids`
+  pre-seeded (or a bigger own-origin pool) to guarantee full tier coverage
+  on a player's very first campaign.
+- **Diplomacy UI polish**: `DiplomacyPanel` gained the two STRATEGY_DETAIL_
+  SPECIFICATION.md section 11 actions that were backend-only. Intel purchase
+  (11.7) is a new row per other-faction section: an `OptionButton` of every
+  *third* living faction plus a purchase button calling `Diplomacy.
+  purchase_intel`. It's architecturally complete but practically inert on
+  the current two-faction dataset (the picker is always empty/disabled,
+  since there's no third faction to buy intel about yet) — this was always
+  the documented reason it was deferred, and remains true; the UI will just
+  start working the moment a third faction exists. Ransom (11.8) is a new,
+  separate scrollable section (not per-other-faction, since `Diplomacy.
+  ransom_captured_unit` derives the captor automatically from the unit
+  itself) listing every currently-captured unit whose `origin_faction_id`
+  is this faction, each with its ransom price and a ransom button.
+- **The encyclopedia** (DATA_DEFINITION.md section 24's
+  `encyclopedia_unit_ids`/`encyclopedia_weapon_ids`/`encyclopedia_pilot_ids`,
+  previously entirely out of scope): `GameState.
+  register_encyclopedia_for_squad(squad_id)` registers every unit_def_id
+  (and its weapon_ids) and every named pilot_id currently crewing a unit in
+  that squad. Wired into three call sites covering how a squad can become
+  known: `rollout_new_unit` (the player's own units — covers both initial
+  seeding and everything produced afterward, uniformly, since
+  `_seed_initial_squads`/`advance_region_production` both already go
+  through it), `refresh_intel_from_colocation`, and
+  `_confirm_battle_participant_intel` (an enemy squad, once the player has
+  actually intel-confirmed it — see the strategic-layer persistent intel
+  milestone above). `Diplomacy.purchase_intel` also registers for the buyer
+  when the buyer is the player. A new read-only `EncyclopediaPanel`
+  (reachable from a new "図鑑" strategic-map button) lists every `UnitDef`/
+  `WeaponDef`/`PilotDef` in the master data, showing full details for a
+  known entry and a "？？？ (未確認)" placeholder otherwise. One real,
+  previously-latent gap this surfaced: `_seed_initial_pilots` assigns named
+  pilots to units *after* `_seed_initial_squads` has already rolled them
+  out, so a naive single registration pass at rollout time would miss the
+  player's own starting named pilots entirely — `start_new_game` now
+  re-registers every player-owned squad once more after pilot seeding
+  finishes to pick that up.
+  - Found and fixed a real, whole-suite-scale test-isolation bug while
+    building this: unlike achievement/event/tech-candidate persistence
+    (each gated behind a narrow, deliberate trigger only a handful of
+    dedicated tests ever reach), encyclopedia registration hangs off
+    `rollout_new_unit`/`refresh_intel_from_colocation` — functions that
+    *nearly every test file in the whole suite* calls transitively via
+    `start_new_game`. Every one of those tests now silently writes real
+    encyclopedia data to `user://profile.json` as a side effect, which
+    would otherwise make `encyclopedia_test.gd`'s "should not be known yet"
+    assertions fragile against whatever else happened to run earlier in the
+    same sweep — not just against its own snapshot. The existing
+    snapshot/restore wrapper (protects the file's on-disk content) isn't
+    enough by itself here; `encyclopedia_test.gd` additionally forces
+    `game_state.profile = ProfileState.new()` right after snapshotting, so
+    its own assertions are deterministic regardless of what any other test
+    file did first. `achievements_profile_test.gd`/`tech_tree_test.gd`
+    remain fine as-is since nothing outside their own files touches
+    `achievement_ids`/`viewed_event_ids`/`unlocked_tech_candidate_ids`.
+
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
 issues player movement orders by squad ID, and the movement phase applies all
@@ -1113,7 +1213,15 @@ at `res://data/units/` is now the only unit-definition path.
   outer local but an assignment to it inside the lambda does not write
   back to the outer scope — use a single-slot `Array` as a mutable box
   instead when a signal-connected lambda needs to report a result back to
-  its caller.
+  its caller. Also gained coverage for the permanent tech-candidate pool:
+  `generate_for_faction`'s optional 4th parameter keeps a cross-faction
+  tech ineligible with an empty `unlocked_candidate_ids` and eligible once
+  listed, and `_advance_research` calls `GameState.
+  unlock_tech_candidate_from_research` only when the completing faction is
+  the player (an AI faction's own completion must not touch the player's
+  profile). Uses the same profile-file snapshot/restore wrapper as
+  `achievements_profile_test.gd`, since `unlock_tech_candidate_from_research`
+  persists.
 - Run `res://tests/event_system_test.gd` for `EventConditionEvaluator`
   (nested all/any/not composition, and every leaf condition type: turn,
   region ownership, the `squad_near_region` BFS hop-cap, tech research,
@@ -1146,6 +1254,43 @@ at `res://data/units/` is now the only unit-definition path.
   catch a wrong type entirely) and have the effect silently no-op instead of
   erroring, since `EventEffectApplier.apply`'s `match` just falls through to
   a different case with a payload shape that doesn't match either.
+- Run `res://tests/ai_profile_test.gd` for the 3 `AiProfileDef` presets
+  loading with the expected relative ordering (`ai_hard` more aggressive/
+  deeper-queuing/lower-reserve than `ai_easy`), `_decide_production`
+  capping a facility's queue at the active profile's
+  `production_queue_length`, `_decide_research` starting research only when
+  the active profile's `research_reserve` is actually cleared, and
+  `_best_squad_destination`'s aggression scaling actually changing an
+  attack decision — a real crimson_empire squad (power 880) attacking a
+  real two-nova_vanguard defending squad (also power 880, an exact-parity
+  gray zone chosen from the two difficulties' computed required ratios) at
+  `ai_hard` but not at `ai_normal`, with relation zeroed out first since
+  `_best_squad_destination`'s required_ratio also factors in friendship
+  (not this test's concern) on top of aggression. Calls
+  `turn_manager.call("_run_ai_orders")` rather than the bare `AiController`
+  identifier — see `ai_squad_movement_test.gd`'s already-established pattern
+  in the compile-order-bug note below; merely writing `AiController.
+  some_static_func()` in a fresh `--script` entry is enough to trigger the
+  bug even for a static call, since it still forces eager compilation of
+  the whole class body.
+- Diplomacy's intel-purchase/ransom UI additions have no new backend test
+  coverage of their own — `Diplomacy.purchase_intel`/`ransom_captured_unit`
+  themselves were already covered by `diplomacy_test.gd` before this pass;
+  only `DiplomacyPanel`'s new rows were smoke-tested (dynamic `load()`, per
+  the compile-order-bug note below).
+- Run `res://tests/encyclopedia_test.gd` for the player's own seeded roster
+  (units, their weapons, and named pilots — the latter needs
+  `start_new_game`'s extra post-pilot-seeding registration pass, since
+  `_seed_initial_pilots` assigns after `_seed_initial_squads` already
+  rolled units out) being known immediately, an enemy faction's units/
+  pilots staying unknown until intel-confirmed, colocation-based
+  confirmation and `rollout_new_unit` (covering mid-campaign production)
+  both registering correctly, idempotency (re-registering an already-known
+  squad adds nothing new), and a `ProfileState.to_dict`/`from_dict` round
+  trip. Forces `game_state.profile = ProfileState.new()` right after its
+  own snapshot/restore setup — see the encyclopedia milestone paragraph
+  above for why the snapshot alone isn't sufficient here, unlike every
+  other profile-touching test in this suite.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

@@ -10,4 +10,4 @@ enemy_hp_multiplier = 1.0
 enemy_firepower_multiplier = 1.0
 enemy_accuracy_add = 0
 enemy_evasion_add = 0
-ai_profile_id = &"normal"
+ai_profile_id = &"ai_normal"

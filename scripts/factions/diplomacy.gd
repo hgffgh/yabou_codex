@@ -386,6 +386,8 @@ static func purchase_intel(game_state: Node, buyer_id: StringName, partner_id: S
 			continue
 		if game_state.campaign_runtime.is_squad_confirmed(partner_id, squad.squad_id):
 			game_state.campaign_runtime.confirm_squad_intel(buyer_id, squad.squad_id, game_state.turn_number)
+			if buyer_id == game_state.player_faction_id:
+				game_state.register_encyclopedia_for_squad(squad.squad_id)
 			confirmed.append(squad.squad_id)
 	game_state.campaign_runtime.log_diplomacy(
 		game_state.turn_number, buyer_id, partner_id, &"intel_purchase",

@@ -27,7 +27,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
 		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties", &"achievements",
-		&"event_effects", &"events",
+		&"event_effects", &"events", &"ai_profiles",
 	]:
 		_validate_ids(category, registry.get_category(category))
 	_validate_global_id_uniqueness(registry)
@@ -46,6 +46,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	_validate_techs(registry)
 	_validate_event_effects(registry)
 	_validate_events(registry)
+	_validate_ai_profiles(registry)
 	_errors.sort()
 	return _errors.duplicate()
 
@@ -56,7 +57,7 @@ func _validate_global_id_uniqueness(registry: MasterDataRegistry) -> void:
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
 		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties", &"achievements",
-		&"event_effects", &"events",
+		&"event_effects", &"events", &"ai_profiles",
 	]:
 		for id_value: Variant in registry.get_category(category):
 			var id := StringName(id_value)
@@ -289,6 +290,14 @@ func _validate_achievements(registry: MasterDataRegistry) -> void:
 		var item: Resource = registry.achievements[id]
 		_require_key(item, &"condition_type", &"achievements", id)
 		_range_float(item, &"exp_bonus_pct", 0.0, 0.5, &"achievements", id)
+
+
+func _validate_ai_profiles(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.ai_profiles):
+		var item: Resource = registry.ai_profiles[id]
+		_min_float(item, &"aggression_multiplier", 0.000001, &"ai_profiles", id)
+		_min_int(item, &"production_queue_length", 1, &"ai_profiles", id)
+		_min_int(item, &"research_reserve", 0, &"ai_profiles", id)
 
 
 func _validate_event_effects(registry: MasterDataRegistry) -> void:

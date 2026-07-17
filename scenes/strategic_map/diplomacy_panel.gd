@@ -1,11 +1,14 @@
 class_name DiplomacyPanel
 extends CanvasLayer
-## STRATEGY_DETAIL_SPECIFICATION.md section 11: treaty proposals and resource
-## gifting for the player faction. Intel purchase and captured-unit ransom
-## are backend-only for now (see HANDOFF.md) -- intel purchase needs a third
-## living faction to be meaningful, and ransom needs a captured-unit browser
-## that doesn't exist yet. Own CanvasLayer, dim background, centered card,
-## matching DevelopmentPanel/SaveLoadPanel's shared style.
+## STRATEGY_DETAIL_SPECIFICATION.md section 11: treaty proposals, resource/
+## tech gifting, intel purchase, and captured-unit ransom for the player
+## faction. Own CanvasLayer, dim background, centered card, matching
+## DevelopmentPanel/SaveLoadPanel's shared style.
+## Intel purchase's third-party picker is architecturally complete but
+## practically inert on the current two-faction dataset (STRATEGY_DETAIL_
+## SPECIFICATION.md section 11.7 needs a third living faction to have
+## anything to buy) -- it'll populate and work the moment a third faction
+## exists.
 
 signal closed
 
@@ -25,6 +28,7 @@ const TREATY_LABELS := {
 var _faction_id: StringName
 var _status_label: Label
 var _rows: VBoxContainer
+var _ransom_rows: VBoxContainer
 
 func setup(faction_id: StringName) -> void:
 	_faction_id = faction_id
@@ -45,13 +49,13 @@ func setup(faction_id: StringName) -> void:
 	root.add_child(center)
 	UIUtils.fill_parent(center)
 
-	var card := UITheme.make_card(Vector2(640, 560))
+	var card := UITheme.make_card(Vector2(640, 700))
 	center.add_child(card)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	vbox.position = Vector2(24, 20)
-	vbox.size = Vector2(592, 520)
+	vbox.size = Vector2(592, 660)
 	card.add_child(vbox)
 
 	var title := Label.new()
@@ -66,12 +70,28 @@ func setup(faction_id: StringName) -> void:
 	vbox.add_child(_status_label)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(592, 420)
+	scroll.custom_minimum_size = Vector2(592, 360)
 	vbox.add_child(scroll)
 	_rows = VBoxContainer.new()
 	_rows.add_theme_constant_override("separation", 12)
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_rows)
+
+	## STRATEGY_DETAIL_SPECIFICATION.md section 11.8: ransom back any of this
+	## faction's own-origin units currently captured by someone else. A
+	## separate section (not per-other-faction) since ransom_captured_unit
+	## derives the captor automatically from the unit itself.
+	var ransom_title := Label.new()
+	ransom_title.text = "鹵獲機ランサム"
+	ransom_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(ransom_title)
+	var ransom_scroll := ScrollContainer.new()
+	ransom_scroll.custom_minimum_size = Vector2(592, 110)
+	vbox.add_child(ransom_scroll)
+	_ransom_rows = VBoxContainer.new()
+	_ransom_rows.add_theme_constant_override("separation", 4)
+	_ransom_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ransom_scroll.add_child(_ransom_rows)
 
 	var close_button := Button.new()
 	close_button.text = "閉じる"
@@ -98,6 +118,23 @@ func _refresh() -> void:
 		if other_faction == null or other_faction.eliminated:
 			continue
 		_rows.add_child(_build_faction_section(other_id, can_act))
+
+	for child in _ransom_rows.get_children():
+		child.queue_free()
+	var captured_ids: Array[StringName] = []
+	for instance_id: StringName in GameState.campaign_runtime.units_by_id.keys():
+		var unit := GameState.campaign_runtime.get_unit(instance_id)
+		if unit != null and unit.captured and unit.origin_faction_id == _faction_id:
+			captured_ids.append(instance_id)
+	captured_ids.sort_custom(func(a: StringName, b: StringName) -> bool: return String(a) < String(b))
+	if captured_ids.is_empty():
+		var none_label := Label.new()
+		none_label.text = "現在鹵獲されている自軍機はありません。"
+		none_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_ransom_rows.add_child(none_label)
+	else:
+		for instance_id: StringName in captured_ids:
+			_ransom_rows.add_child(_build_ransom_row(instance_id, can_act))
 
 func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	var fdef: FactionDef = GameState.faction_defs.get(other_id)
@@ -175,8 +212,72 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	tech_row.add_child(tech_gift_button)
 
 	section.add_child(tech_row)
+
+	## STRATEGY_DETAIL_SPECIFICATION.md section 11.7: buys buyer_id's own
+	## intel on every squad other_id (the "partner") has already confirmed
+	## belonging to some third faction. Architecturally complete but
+	## practically inert until a third living faction exists -- see this
+	## class's own doc comment.
+	var intel_row := HBoxContainer.new()
+	intel_row.add_theme_constant_override("separation", 6)
+	var third_party_picker := OptionButton.new()
+	third_party_picker.custom_minimum_size = Vector2(200, 36)
+	var third_party_ids := GameState.factions.keys()
+	third_party_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for third_id: StringName in third_party_ids:
+		if third_id == _faction_id or third_id == other_id:
+			continue
+		var third_faction: Faction = GameState.get_faction(third_id)
+		if third_faction == null or third_faction.eliminated:
+			continue
+		var third_fdef: FactionDef = GameState.faction_defs.get(third_id)
+		third_party_picker.add_item(third_fdef.display_name if third_fdef != null else String(third_id))
+		third_party_picker.set_item_metadata(third_party_picker.item_count - 1, third_id)
+	if third_party_picker.item_count == 0:
+		third_party_picker.add_item("(第三勢力なし)")
+		third_party_picker.disabled = true
+	intel_row.add_child(third_party_picker)
+
+	var intel_button := Button.new()
+	intel_button.text = "情報購入(%d)" % GameConstants.INTEL_PURCHASE_COST_FUNDS
+	intel_button.custom_minimum_size = Vector2(140, 36)
+	intel_button.disabled = not can_act or relation.intel_purchase_cooldown_turns > 0 \
+		or third_party_picker.disabled or faction.funds < GameConstants.INTEL_PURCHASE_COST_FUNDS
+	intel_button.pressed.connect(_on_intel_purchase_pressed.bind(other_id, third_party_picker))
+	intel_row.add_child(intel_button)
+	section.add_child(intel_row)
+
 	section.add_child(HSeparator.new())
 	return section
+
+
+## STRATEGY_DETAIL_SPECIFICATION.md section 11.8.
+func _build_ransom_row(unit_instance_id: StringName, can_act: bool) -> Control:
+	var unit := GameState.campaign_runtime.get_unit(unit_instance_id)
+	var unit_def: UnitDef = GameState.master_data.units.get(unit.unit_def_id)
+	var price := ceili(float(GameConstants.UNIT_PRODUCTION_FUNDS[unit_def.size]) * GameConstants.RANSOM_PRICE_PCT) if unit_def != null else 0
+	var captor_fdef: FactionDef = GameState.faction_defs.get(unit.owner_faction_id)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var label := Label.new()
+	label.custom_minimum_size = Vector2(420, 0)
+	var unit_name := tr(String(unit_def.display_name_key)) if unit_def != null else String(unit.unit_def_id)
+	var captor_name := captor_fdef.display_name if captor_fdef != null else String(unit.owner_faction_id)
+	label.text = "%s (捕獲: %s) ── 身代金 %d" % [unit_name, captor_name, price]
+	row.add_child(label)
+
+	var faction := GameState.get_faction(_faction_id)
+	var button := Button.new()
+	button.text = "身代金"
+	button.custom_minimum_size = Vector2(90, 36)
+	button.disabled = not can_act or faction == null or faction.funds < price
+	button.pressed.connect(_on_ransom_pressed.bind(unit_instance_id))
+	row.add_child(button)
+
+	return row
 
 func _build_proposal_button(other_id: StringName, treaty: GameEnums.TreatyType, duration: int, can_act: bool) -> Button:
 	var relation := GameState.campaign_runtime.get_relation_state(_faction_id, other_id)
@@ -257,6 +358,26 @@ func _on_tech_gift_pressed(other_id: StringName, picker: OptionButton) -> void:
 		_status_label.text = "技術贈与に失敗しました: %s" % errors[0]
 	else:
 		_status_label.text = "技術を贈与しました。"
+
+func _on_intel_purchase_pressed(partner_id: StringName, picker: OptionButton) -> void:
+	if picker.item_count == 0 or picker.disabled or picker.selected < 0:
+		return
+	var third_party_id := StringName(picker.get_item_metadata(picker.selected))
+	var result := Diplomacy.purchase_intel(GameState, _faction_id, partner_id, third_party_id)
+	_refresh()
+	var errors := result.errors as PackedStringArray
+	if not errors.is_empty():
+		_status_label.text = "情報購入に失敗しました: %s" % errors[0]
+	else:
+		_status_label.text = "情報を購入しました。(確認した部隊数: %d)" % (result.confirmed_squad_ids as Array).size()
+
+func _on_ransom_pressed(unit_instance_id: StringName) -> void:
+	var errors := Diplomacy.ransom_captured_unit(GameState, unit_instance_id)
+	_refresh()
+	if not errors.is_empty():
+		_status_label.text = "身代金の支払いに失敗しました: %s" % errors[0]
+	else:
+		_status_label.text = "機体を取り戻しました。"
 
 func _on_close_pressed() -> void:
 	closed.emit()

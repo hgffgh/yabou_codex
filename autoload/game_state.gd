@@ -91,10 +91,17 @@ func start_new_game(chosen_player_faction_id: StringName, chosen_difficulty_id: 
 		regions[id] = Region.new(region_defs[id])
 	_seed_initial_squads()
 	_seed_initial_pilots()
+	# rollout_new_unit (inside _seed_initial_squads) already registered every
+	# player unit/weapon, but at that point pilot_id was still empty --
+	# _seed_initial_pilots assigns named pilots afterward, so re-register
+	# each player squad now to pick those up too.
+	for squad: SquadState in campaign_runtime.squads_by_id.values():
+		if squad != null and squad.owner_faction_id == player_faction_id:
+			register_encyclopedia_for_squad(squad.squad_id)
 	campaign_runtime.ensure_relation_states(factions.keys())
 	campaign_rng.randomize()
 	for id: StringName in factions:
-		(factions[id] as Faction).generated_tech_nodes = TechTreeGenerator.generate_for_faction(id, master_data, campaign_rng)
+		(factions[id] as Faction).generated_tech_nodes = TechTreeGenerator.generate_for_faction(id, master_data, campaign_rng, profile.unlocked_tech_candidate_ids)
 	recompute_all_supply_networks()
 
 	turn_advanced.emit(turn_number)
@@ -184,6 +191,16 @@ func _count_successful_player_treaties() -> int:
 		if StringName(entry.get("actor_faction_id", "")) == player_faction_id or StringName(entry.get("target_faction_id", "")) == player_faction_id:
 			count += 1
 	return count
+
+## STRATEGY_DETAIL_SPECIFICATION.md section 7.2: called from
+## TurnManager._advance_research whenever the *player's own* faction
+## finishes researching a node -- permanently unlocks that tech_id as a
+## cross-campaign candidate (TechTreeGenerator.generate_for_faction reads
+## this back on every future start_new_game). Persists immediately, same as
+## every other profile mutation.
+func unlock_tech_candidate_from_research(tech_id: StringName) -> void:
+	if profile.unlock_tech_candidate(tech_id):
+		save_profile()
 
 ## EVENT_DETAIL_SPECIFICATION.md section 8: "条件達成時にイベントを発生待ち
 ## へ登録する". Called once per faction right before that faction's own
@@ -689,8 +706,42 @@ func _apply_pilot_injury(pilot_id: StringName, result: BattleResultState) -> voi
 func _confirm_battle_participant_intel(battle: BattleRuntimeState) -> void:
 	for squad_id: StringName in battle.attacker_squad_ids:
 		campaign_runtime.confirm_squad_intel(battle.defender_faction_id, squad_id, turn_number)
+		if battle.defender_faction_id == player_faction_id:
+			register_encyclopedia_for_squad(squad_id)
 	for squad_id: StringName in battle.defender_squad_ids:
 		campaign_runtime.confirm_squad_intel(battle.attacker_faction_id, squad_id, turn_number)
+		if battle.attacker_faction_id == player_faction_id:
+			register_encyclopedia_for_squad(squad_id)
+
+## DATA_DEFINITION.md section 24's encyclopedia_unit_ids/weapon_ids/
+## pilot_ids: registers every unit_def_id (and its weapon_ids) and every
+## named pilot_id currently crewing a unit in squad_id, once that squad has
+## become known to the player -- their own roster (via rollout_new_unit
+## below) or a hostile squad the player has intel-confirmed (battle contact
+## or strategic colocation). Idempotent; only persists if something new was
+## actually added.
+func register_encyclopedia_for_squad(squad_id: StringName) -> void:
+	var squad := campaign_runtime.get_squad(squad_id)
+	if squad == null:
+		return
+	var changed := false
+	for unit_id: StringName in squad.unit_instance_ids:
+		var unit := campaign_runtime.get_unit(unit_id)
+		if unit == null:
+			continue
+		var unit_def := master_data.units.get(unit.unit_def_id) as UnitDef
+		if unit_def == null:
+			continue
+		if profile.register_encyclopedia_unit(unit.unit_def_id):
+			changed = true
+		for weapon_id: StringName in unit_def.weapon_ids:
+			if profile.register_encyclopedia_weapon(weapon_id):
+				changed = true
+		if not unit.pilot_id.is_empty() and master_data.pilots.has(unit.pilot_id):
+			if profile.register_encyclopedia_pilot(unit.pilot_id):
+				changed = true
+	if changed:
+		save_profile()
 
 ## Strategic-layer analogue of COMBAT_DETAIL_SPECIFICATION.md section 24's
 ## "十分な索敵を受けた部隊は確認済みになる" (sufficient sensor detection
@@ -708,6 +759,8 @@ func refresh_intel_from_colocation(faction_id: StringName) -> void:
 		for squad: SquadState in campaign_runtime.get_squads_in_region(region_id):
 			if squad.owner_faction_id != faction_id:
 				campaign_runtime.confirm_squad_intel(faction_id, squad.squad_id, turn_number)
+				if faction_id == player_faction_id:
+					register_encyclopedia_for_squad(squad.squad_id)
 
 func combat_capable_squad_ids_in_region(region_id: StringName, faction_id: StringName) -> Array[StringName]:
 	var result: Array[StringName] = []
@@ -803,7 +856,7 @@ func rollout_new_unit(
 	region_id: StringName,
 	display_name: String = "",
 ) -> Dictionary:
-	return campaign_runtime.rollout_unit(
+	var result := campaign_runtime.rollout_unit(
 		unit_def_id,
 		owner_faction_id,
 		region_id,
@@ -811,6 +864,12 @@ func rollout_new_unit(
 		region_defs,
 		display_name,
 	)
+	# The player's own units are always known -- covers both the initial
+	# seeded roster and everything produced afterward, uniformly, since
+	# _seed_initial_squads/advance_region_production both go through here.
+	if (result.errors as PackedStringArray).is_empty() and owner_faction_id == player_faction_id:
+		register_encyclopedia_for_squad((result.squad as SquadState).squad_id)
+	return result
 
 
 func plan_squad_movement(squad_id: StringName, destination_region_id: StringName, acting_faction_id: StringName) -> PackedStringArray:

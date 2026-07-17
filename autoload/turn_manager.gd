@@ -115,6 +115,8 @@ func _advance_research(faction_id: StringName) -> void:
 		faction.current_research = null
 		if node != null:
 			node.researched = true
+			if faction_id == GameState.player_faction_id:
+				GameState.unlock_tech_candidate_from_research(node.tech_id)
 			research_completed.emit(faction_id, node.tech_id)
 
 func start_new_game(player_faction_id: StringName, difficulty_id: StringName = &"normal") -> void:

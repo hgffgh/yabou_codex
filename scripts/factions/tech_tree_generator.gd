@@ -5,11 +5,18 @@ extends RefCounted
 ## mandatory_base_tech TechDefs are always placed at their own tier; the
 ## rest of each tier is filled by a deterministic random draw (using the
 ## campaign's own RNG stream, so a given seed always regenerates the same
-## tree) from every other non-mandatory TechDef -- DATA_DEFINITION.md's
-## "恒久アンロック済み候補" (the cross-campaign permanent unlock pool) isn't
-## modeled: there's no encyclopedia/capture-analysis system yet to grow it,
-## so every non-mandatory tech is always treated as already unlocked for the
-## draw. See HANDOFF.md for the full tradeoff.
+## tree) from that faction's own-origin non-mandatory TechDefs plus
+## whichever OTHER factions' techs are in unlocked_candidate_ids --
+## DATA_DEFINITION.md's "恒久アンロック済み候補" (ProfileState.
+## unlocked_tech_candidate_ids), grown by GameState.unlock_tech_candidate
+## whenever the player's own faction finishes researching any tech
+## (TurnManager._advance_research). A fresh profile with nothing unlocked
+## yet therefore only draws each faction's own-origin techs -- playing more
+## campaigns and researching (or being gifted and then researching) other
+## factions' techs is what permanently grows the candidate pool for every
+## future campaign and faction. Gifted nodes (Diplomacy.gift_tech, the
+## TECH_CANDIDATE event effect) are unaffected by this restriction; they're
+## added directly to generated_tech_nodes without going through this draw.
 ##
 ## "生成後に全技術へ到達可能か検証し、到達不能があれば再生成する" doesn't
 ## need an actual regenerate-and-retry loop here: every node either has no
@@ -21,7 +28,10 @@ extends RefCounted
 const TARGET_NODES_PER_TIER := 3
 const TIER_COUNT := 5
 
-static func generate_for_faction(faction_id: StringName, registry: MasterDataRegistry, rng: RandomNumberGenerator) -> Dictionary:
+static func generate_for_faction(
+	faction_id: StringName, registry: MasterDataRegistry, rng: RandomNumberGenerator,
+	unlocked_candidate_ids: Array[StringName] = [],
+) -> Dictionary:
 	var nodes: Dictionary = {}
 	var nodes_by_tier: Dictionary = {}
 	var used_tech_ids: Dictionary = {}
@@ -40,7 +50,7 @@ static func generate_for_faction(faction_id: StringName, registry: MasterDataReg
 			if def.mandatory_base_tech:
 				if def.origin_faction_id == faction_id:
 					mandatory.append(tech_id)
-			else:
+			elif def.origin_faction_id == faction_id or unlocked_candidate_ids.has(tech_id):
 				pool.append(tech_id)
 
 		var selected: Array[StringName] = mandatory.duplicate()

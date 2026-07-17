@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/ai_profile_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"ai_easy"
+aggression_multiplier = 0.7
+production_queue_length = 2
+research_reserve = 600

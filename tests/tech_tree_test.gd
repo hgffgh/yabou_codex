@@ -5,6 +5,10 @@ extends SceneTree
 var failures := PackedStringArray()
 var game_state: Node
 var turn_manager: Node
+var _profile_path_existed_before := false
+var _original_profile_text := ""
+
+const PROFILE_PATH := "user://profile.json"
 
 
 func _initialize() -> void:
@@ -16,12 +20,33 @@ func _initialize() -> void:
 		quit(1)
 		return
 
+	# _test_advance_research_unlocks_a_permanent_tech_candidate below calls
+	# GameState.unlock_tech_candidate_from_research, which persists to the
+	# real user://profile.json -- snapshot/restore around the whole run,
+	# same reason as achievements_profile_test.gd/event_system_test.gd.
+	_profile_path_existed_before = FileAccess.file_exists(PROFILE_PATH)
+	if _profile_path_existed_before:
+		var existing := FileAccess.open(PROFILE_PATH, FileAccess.READ)
+		_original_profile_text = existing.get_as_text()
+		existing.close()
+
 	_test_generated_tree_places_mandatory_base_techs_at_tier_one()
 	_test_generated_tree_is_reachable_and_has_no_duplicate_techs()
 	_test_generated_tree_is_deterministic_for_a_given_seed()
 	_test_start_research_requires_prerequisites_and_funds()
 	_test_advance_research_completes_and_frees_the_slot()
 	_test_research_discount_caps_at_25_percent()
+	_test_permanent_pool_restricts_cross_faction_techs_until_unlocked()
+	_test_advance_research_unlocks_a_permanent_tech_candidate()
+
+	if _profile_path_existed_before:
+		var restored := FileAccess.open(PROFILE_PATH, FileAccess.WRITE)
+		restored.store_string(_original_profile_text)
+		restored.close()
+	elif FileAccess.file_exists(PROFILE_PATH):
+		DirAccess.remove_absolute(PROFILE_PATH)
+	game_state._load_profile()
+
 	_finish()
 
 
@@ -159,6 +184,74 @@ func _test_research_discount_caps_at_25_percent() -> void:
 	# current dataset has no facility instances for; the 0%% no-facility
 	# case above and the formula's own minf(...,0.25) clamp (read directly
 	# in _research_discount_pct) are what's exercised here.
+
+
+## nova_republic's own tech dataset has no non-mandatory tier-5 entry
+## (singularity_drive is crimson_empire-origin, tier 5) -- with an empty
+## unlocked_candidate_ids, nova's generated tree should never draw it, and
+## with singularity_drive explicitly unlocked, it should always be eligible
+## (though not guaranteed, since it still competes for TARGET_NODES_PER_TIER
+## slots against nothing else at tier 5 for nova -- with only one eligible
+## candidate it's drawn deterministically every time).
+func _test_permanent_pool_restricts_cross_faction_techs_until_unlocked() -> void:
+	var rng_locked := RandomNumberGenerator.new()
+	rng_locked.seed = 99
+	var locked_nodes: Dictionary = TechTreeGenerator.generate_for_faction(&"nova_republic", game_state.master_data, rng_locked)
+	var has_singularity_locked := false
+	for node_id: Variant in locked_nodes:
+		if (locked_nodes[node_id] as GeneratedTechNodeState).tech_id == &"singularity_drive":
+			has_singularity_locked = true
+	_check(not has_singularity_locked, "a cross-faction tech not in unlocked_candidate_ids should never be drawn")
+
+	var rng_unlocked := RandomNumberGenerator.new()
+	rng_unlocked.seed = 99
+	var unlocked_ids: Array[StringName] = [&"singularity_drive"]
+	var unlocked_nodes: Dictionary = TechTreeGenerator.generate_for_faction(&"nova_republic", game_state.master_data, rng_unlocked, unlocked_ids)
+	var has_singularity_unlocked := false
+	for node_id: Variant in unlocked_nodes:
+		if (unlocked_nodes[node_id] as GeneratedTechNodeState).tech_id == &"singularity_drive":
+			has_singularity_unlocked = true
+	_check(has_singularity_unlocked, "a cross-faction tech listed in unlocked_candidate_ids should become eligible for the draw")
+
+
+func _test_advance_research_unlocks_a_permanent_tech_candidate() -> void:
+	turn_manager.start_new_game(&"nova_republic")
+	var nova: Faction = game_state.get_faction(&"nova_republic")
+	# en_capacitor_matrix (tier 2) is never researched to completion by any
+	# earlier test in this file, unlike improved_targeting_array -- picking
+	# an untouched tech_id avoids cross-test coupling through the live
+	# GameState.profile singleton, which (deliberately, matching
+	# achievements_profile_test.gd) isn't reset between test functions,
+	# only snapshotted/restored around the whole file.
+	_check(not game_state.profile.unlocked_tech_candidate_ids.has(&"en_capacitor_matrix"), "setup: this tech should not already be permanently unlocked")
+
+	var node := GeneratedTechNodeState.new()
+	node.node_id = &"t1"
+	node.tech_id = &"en_capacitor_matrix"
+	node.tier = 2
+	nova.generated_tech_nodes = {node.node_id: node}
+	nova.funds = 10000
+	_check(turn_manager.start_research(&"nova_republic", &"t1").is_empty(), "setup: research should start cleanly")
+	for _i in range(game_state.campaign_config.research_turns[1]):
+		turn_manager._advance_research(&"nova_republic")
+
+	_check(node.researched, "setup: the node should have completed")
+	_check(game_state.profile.unlocked_tech_candidate_ids.has(&"en_capacitor_matrix"), "completing research as the player faction should permanently unlock the tech_id")
+
+	# A crimson_empire (AI) completion must NOT touch the player's profile.
+	turn_manager.start_new_game(&"nova_republic")
+	var crimson: Faction = game_state.get_faction(&"crimson_empire")
+	var crimson_node := GeneratedTechNodeState.new()
+	crimson_node.node_id = &"c1"
+	crimson_node.tech_id = &"advanced_propulsion"
+	crimson_node.tier = 3
+	crimson.generated_tech_nodes = {crimson_node.node_id: crimson_node}
+	crimson.funds = 10000
+	_check(turn_manager.start_research(&"crimson_empire", &"c1").is_empty(), "setup: crimson's research should start cleanly")
+	for _i in range(game_state.campaign_config.research_turns[2]):
+		turn_manager._advance_research(&"crimson_empire")
+	_check(crimson_node.researched, "setup: crimson's node should have completed")
+	_check(not game_state.profile.unlocked_tech_candidate_ids.has(&"advanced_propulsion"), "an AI faction's own research completion should not unlock a permanent candidate for the player's profile")
 
 
 func _finish() -> void:

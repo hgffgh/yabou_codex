@@ -10,4 +10,4 @@ enemy_hp_multiplier = 0.75
 enemy_firepower_multiplier = 0.75
 enemy_accuracy_add = -15
 enemy_evasion_add = -15
-ai_profile_id = &"easy"
+ai_profile_id = &"ai_easy"

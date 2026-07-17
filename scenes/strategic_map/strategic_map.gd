@@ -307,6 +307,12 @@ func _build_ui_overlay() -> void:
 	save_load_button.pressed.connect(_on_save_load_pressed)
 	top_bar.add_child(save_load_button)
 
+	var encyclopedia_button := Button.new()
+	encyclopedia_button.text = "図鑑"
+	encyclopedia_button.custom_minimum_size = Vector2(90, 40)
+	encyclopedia_button.pressed.connect(_on_encyclopedia_pressed)
+	top_bar.add_child(encyclopedia_button)
+
 	_end_turn_button = Button.new()
 	_end_turn_button.text = "行動終了"
 	_end_turn_button.custom_minimum_size = Vector2(120, 40)
@@ -661,6 +667,11 @@ func _on_development_pressed() -> void:
 
 func _on_save_load_pressed() -> void:
 	var panel := SaveLoadPanel.new()
+	add_child(panel)
+	panel.setup()
+
+func _on_encyclopedia_pressed() -> void:
+	var panel := EncyclopediaPanel.new()
 	add_child(panel)
 	panel.setup()
 

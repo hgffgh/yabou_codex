@@ -10,21 +10,28 @@ static func decide_orders(faction_id: StringName) -> void:
 	var faction: Faction = GameState.get_faction(faction_id)
 	if faction == null:
 		return
-	_decide_research(faction_id, faction)
+	var profile := ai_profile()
+	_decide_research(faction_id, faction, profile)
 	for region in GameState.regions.values():
 		if region.owner_faction_id != faction_id:
 			continue
-		_decide_production(faction, region)
-	_decide_squad_movements(faction_id, faction)
+		_decide_production(faction, region, profile)
+	_decide_squad_movements(faction_id, faction, profile)
 
-const MAX_QUEUE_LENGTH := 3  # keep the AI's production responsive to the battlefield rather than committing resources many turns ahead
-const RESEARCH_RESERVE := 300  # only research if this much would still be left over for production
+## DATA_DEFINITION.md section 5: DifficultyDef.ai_profile_id selects one of
+## these to drive the knobs below. Falls back to a neutral AiProfileDef.new()
+## (matching the pre-profile-system hardcoded constants this replaced) if
+## the id doesn't resolve, same graceful-degradation pattern as
+## GameState.current_difficulty().
+static func ai_profile() -> AiProfileDef:
+	var profile := GameState.master_data.ai_profiles.get(GameState.current_difficulty().ai_profile_id) as AiProfileDef
+	return profile if profile != null else AiProfileDef.new()
 
 ## Opportunistic: research the cheapest currently-available node (lowest
 ## tier, ties broken by id) whenever affordable with a comfortable buffer
 ## left over, rather than always saving for it or never bothering -- a
 ## faction that's flush with income naturally starts climbing the tree.
-static func _decide_research(faction_id: StringName, faction: Faction) -> void:
+static func _decide_research(faction_id: StringName, faction: Faction, profile: AiProfileDef) -> void:
 	if faction.current_research != null:
 		return
 	var node_id := _cheapest_available_node(faction)
@@ -33,7 +40,7 @@ static func _decide_research(faction_id: StringName, faction: Faction) -> void:
 	var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
 	var config: CampaignConfig = GameState.campaign_config
 	var cost: int = config.research_costs[node.tier - 1]
-	if faction.funds >= cost + RESEARCH_RESERVE:
+	if faction.funds >= cost + profile.research_reserve:
 		TurnManager.start_research(faction_id, node_id)
 
 static func _cheapest_available_node(faction: Faction) -> StringName:
@@ -51,13 +58,13 @@ static func _cheapest_available_node(faction: Faction) -> StringName:
 		return String(a) < String(b))
 	return candidates[0]
 
-static func _decide_production(faction: Faction, region: Region) -> void:
+static func _decide_production(faction: Faction, region: Region, profile: AiProfileDef) -> void:
 	var facility_ids := GameState.production_facility_ids_for_region(region.def.id)
 	if facility_ids.is_empty():
 		return
 	var facility_id: StringName = facility_ids[0]
 	var queue := GameState.campaign_runtime.production_queues_by_facility_id.get(facility_id) as ProductionQueueState
-	if queue != null and queue.job_ids.size() >= MAX_QUEUE_LENGTH:
+	if queue != null and queue.job_ids.size() >= profile.production_queue_length:
 		return
 	var best := _best_affordable_unit(faction)
 	if best != null:
@@ -85,7 +92,7 @@ static func _best_affordable_unit(faction: Faction) -> UnitDef:
 ## Issues one adjacent order per eligible new-model squad. Hostile destinations
 ## take priority; otherwise squads advance through owned regions toward the
 ## neighbor with the most hostile borders.
-static func _decide_squad_movements(faction_id: StringName, faction: Faction) -> void:
+static func _decide_squad_movements(faction_id: StringName, faction: Faction, profile: AiProfileDef) -> void:
 	var squads := GameState.campaign_runtime.squads_by_id.values()
 	squads.sort_custom(func(a: SquadState, b: SquadState) -> bool: return String(a.squad_id) < String(b.squad_id))
 	for squad: SquadState in squads:
@@ -94,19 +101,24 @@ static func _decide_squad_movements(faction_id: StringName, faction: Faction) ->
 		var source := GameState.get_region(squad.region_id) as Region
 		if source == null:
 			continue
-		var target_id := _best_squad_destination(faction_id, faction, squad, source)
+		var target_id := _best_squad_destination(faction_id, faction, squad, source, profile)
 		if not target_id.is_empty():
 			GameState.plan_squad_movement(squad.squad_id, target_id, faction_id)
 
 
+## required_ratio is divided by profile.aggression_multiplier (DATA_
+## DEFINITION.md section 5's ai_profile_id): a more aggressive profile
+## accepts a lower relative power advantage before attacking, on top of
+## FactionDef.ai_aggression's per-faction baseline.
 static func _best_squad_destination(
 	faction_id: StringName,
 	faction: Faction,
 	squad: SquadState,
 	source: Region,
+	profile: AiProfileDef,
 ) -> StringName:
 	var own_power := _squad_power(squad)
-	var base_required_ratio: float = lerp(2.0, 1.05, faction.def.ai_aggression)
+	var base_required_ratio: float = lerp(2.0, 1.05, faction.def.ai_aggression) / profile.aggression_multiplier
 	var best_target_id: StringName = &""
 	var best_score := -INF
 	var neighbor_ids := source.def.neighbor_ids.duplicate()
