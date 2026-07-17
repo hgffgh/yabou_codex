@@ -256,7 +256,13 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 		var attack_command := (float(_active_leader_command(battle, attacker_squad)) - 100.0) * 0.1
 		var defense_command := (float(_active_leader_command(battle, target_squad)) - 100.0) * 0.1
 		var cover_evasion := _cover_evasion_bonus(battle, target_squad, weapon)
-		var accuracy := clampi(roundi(float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command - (10.0 if target.defending else 0.0) - float(cover_evasion) + pilot_skill_modifier(battle, attacker, &"accuracy") - pilot_skill_modifier(battle, target, &"evasion")), 5, 95)
+		var accuracy := clampi(roundi(
+			float(weapon.base_accuracy_pct) + attack_bonus + attack_command - float(target_def.evasion) - reaction_bonus - defense_command
+			- (10.0 if target.defending else 0.0) - float(cover_evasion)
+			+ float(battle.environment_aptitude_accuracy_add(attacker_def)) - float(battle.environment_aptitude_evasion_add(target_def))
+			+ float(battle.accuracy_add(attacker_squad.faction_id)) - float(battle.evasion_add(target_squad.faction_id))
+			+ pilot_skill_modifier(battle, attacker, &"accuracy") - pilot_skill_modifier(battle, target, &"evasion")
+		), 5, 95)
 		var hit := roll(battle, 100) < accuracy
 		var damage := 0
 		var critical := false
@@ -265,7 +271,8 @@ static func _resolve_attack(battle: BattleRuntimeState, attack: Dictionary, targ
 			var pilot_firepower := float(attack_skill - 100)
 			var pilot_armor := float(roundi((float(target.defense) - 100.0) * 0.5))
 			var effective_armor := maxf(0.0, float(target_def.armor) + pilot_armor + (20.0 if target.defending else 0.0) - float(weapon.penetration) + pilot_skill_modifier(battle, target, &"armor"))
-			var base_damage := maxf(hit_power * 0.05, float(attacker_def.firepower) + pilot_firepower + hit_power - effective_armor + pilot_skill_modifier(battle, attacker, &"firepower"))
+			var attacker_firepower := float(attacker_def.firepower) * battle.firepower_multiplier(attacker_squad.faction_id)
+			var base_damage := maxf(hit_power * 0.05, attacker_firepower + pilot_firepower + hit_power - effective_armor + pilot_skill_modifier(battle, attacker, &"firepower"))
 			base_damage *= _attribute_multiplier(target_def, weapon.damage_attribute)
 			base_damage *= float(90 + roll(battle, 21)) / 100.0
 			var critical_rate := clampi(weapon.base_critical_pct + floori(float(attacker.reaction - 100) / 10.0) + roundi(pilot_skill_modifier(battle, attacker, &"critical")), 0, 50)

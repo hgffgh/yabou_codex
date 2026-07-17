@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/difficulty_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"hard"
+enemy_income_multiplier = 1.5
+enemy_hp_multiplier = 1.25
+enemy_firepower_multiplier = 1.25
+enemy_accuracy_add = 15
+enemy_evasion_add = 15
+ai_profile_id = &"hard"

@@ -1,7 +1,9 @@
 extends Control
 
 var _selected_faction_id: StringName = &""
+var _selected_difficulty_id: StringName = &"normal"
 var _faction_buttons: Dictionary = {}
+var _difficulty_buttons: Dictionary = {}
 var _begin_button: Button
 var _info_label: Label
 
@@ -62,6 +64,31 @@ func _ready() -> void:
 
 	vbox.add_child(_spacer(8))
 
+	var difficulty_title := Label.new()
+	difficulty_title.text = "難易度"
+	difficulty_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(difficulty_title)
+
+	var difficulty_row := HBoxContainer.new()
+	difficulty_row.add_theme_constant_override("separation", 10)
+	difficulty_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(difficulty_row)
+
+	var difficulty_labels := {&"easy": "イージー", &"normal": "ノーマル", &"hard": "ハード"}
+	var difficulty_ids := GameState.master_data.difficulties.keys()
+	difficulty_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for did in difficulty_ids:
+		var dbtn := Button.new()
+		dbtn.text = difficulty_labels.get(did, String(did))
+		dbtn.custom_minimum_size = Vector2(110, 44)
+		dbtn.toggle_mode = true
+		dbtn.button_pressed = did == _selected_difficulty_id
+		dbtn.pressed.connect(_on_difficulty_selected.bind(did))
+		difficulty_row.add_child(dbtn)
+		_difficulty_buttons[did] = dbtn
+
+	vbox.add_child(_spacer(8))
+
 	_begin_button = Button.new()
 	_begin_button.text = "キャンペーン開始"
 	_begin_button.custom_minimum_size = Vector2(240, 46)
@@ -89,8 +116,13 @@ func _on_faction_selected(fid: StringName) -> void:
 	_info_label.text = "%s を選択しました。首都: %s" % [fdef.display_name, capital.display_name]
 	_begin_button.disabled = false
 
+func _on_difficulty_selected(did: StringName) -> void:
+	_selected_difficulty_id = did
+	for other_id in _difficulty_buttons:
+		_difficulty_buttons[other_id].button_pressed = other_id == did
+
 func _on_begin_pressed() -> void:
 	if _selected_faction_id == &"":
 		return
-	TurnManager.start_new_game(_selected_faction_id)
+	TurnManager.start_new_game(_selected_faction_id, _selected_difficulty_id)
 	SceneRouter.goto_strategic_map()

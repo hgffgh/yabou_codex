@@ -1,11 +1,21 @@
 class_name Diplomacy
 extends RefCounted
 ## STRATEGY_DETAIL_SPECIFICATION.md section 11 / DATA_DEFINITION.md section
-## 18: treaty proposals, resource gifting, captured-unit ransom, and intel
-## purchase, operating on a CampaignRuntimeState's relation_states. Tech
-## gifting (section 11.6) is deferred -- see HANDOFF.md -- since it needs a
-## research-candidate system that doesn't exist yet on top of the current
-## faction-wide tech_tier placeholder.
+## 18: treaty proposals, resource gifting, tech gifting, captured-unit
+## ransom, and intel purchase, operating on a CampaignRuntimeState's
+## relation_states.
+##
+## gift_tech is a deliberately simplified stand-in for section 11.6: the
+## real spec registers a gifted tech as an extra research candidate the
+## receiver can still choose to research at the normal Tier cost/duration,
+## which needs the generated tech-node/research-candidate system
+## DATA_DEFINITION.md targets and this codebase doesn't have yet -- today's
+## Faction.tech_tier is still a flat, sequential counter with no per-tech
+## identity at all. Until that system exists, gift_tech instead completes
+## the receiver's next tier immediately and for free, gated on the giver
+## already having researched at least that far (so a gift can never hand
+## over tech nobody in the campaign actually has) -- see HANDOFF.md for the
+## full tradeoff.
 ##
 ## Every function below takes `game_state` as an explicit first parameter
 ## instead of referencing the GameState autoload by its bare global
@@ -290,6 +300,45 @@ static func gift_resources(game_state: Node, giver_id: StringName, receiver_id: 
 	)
 	game_state.campaign_runtime.log_diplomacy(
 		game_state.turn_number, giver_id, receiver_id, &"gift", {"funds": funds, "materials": materials}, true
+	)
+	return errors
+
+
+## See the class doc comment for how this simplifies section 11.6. Shares
+## gift_resources' cooldown (section 11.4: "資源贈与と技術贈与は共通の贈与
+## 待ち時間を使用し"). "同じ技術を同じ勢力へ複数回贈与できない" needs no
+## extra bookkeeping here: since this always targets receiver_id's next
+## tier and tech_tier only ever increases, a repeat gift naturally targets a
+## tier one higher than the last, never the same one twice.
+static func gift_tech(game_state: Node, giver_id: StringName, receiver_id: StringName) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var giver: Faction = game_state.get_faction(giver_id)
+	var receiver: Faction = game_state.get_faction(receiver_id)
+	if giver_id == receiver_id or giver == null or receiver == null:
+		errors.append("diplomacy: giver and receiver must be distinct, resolvable factions")
+		return errors
+
+	var max_tier: int = game_state.campaign_config.research_costs.size()
+	if receiver.tech_tier >= max_tier:
+		errors.append("diplomacy: receiver has already researched every available tier")
+	if giver.tech_tier <= receiver.tech_tier:
+		errors.append("diplomacy: giver has not researched a tier beyond the receiver's own")
+	if receiver.research_in_progress:
+		errors.append("diplomacy: receiver must not have research already in progress")
+	var relation: RelationState = game_state.campaign_runtime.get_relation_state(giver_id, receiver_id)
+	if relation.gift_cooldown_turns > 0:
+		errors.append("diplomacy: gifting to this faction is on cooldown")
+	if not errors.is_empty():
+		errors.sort()
+		return errors
+
+	receiver.tech_tier += 1
+	relation.gift_cooldown_turns = GameConstants.DIPLOMACY_GIFT_COOLDOWN_TURNS
+	relation.friendship = clampi(
+		relation.friendship + GameConstants.GIFT_FRIENDSHIP_GAIN, GameConstants.FRIENDSHIP_MIN, GameConstants.FRIENDSHIP_MAX
+	)
+	game_state.campaign_runtime.log_diplomacy(
+		game_state.turn_number, giver_id, receiver_id, &"tech_gift", {"tech_tier": receiver.tech_tier}, true
 	)
 	return errors
 

@@ -47,6 +47,11 @@ var applied_to_campaign: bool = false
 ## destination, without this pure simulation state needing a live
 ## dependency on the GameState autoload.
 var player_faction_id: StringName = &""
+## Snapshotted from GameState.current_difficulty() at creation, for the same
+## reason player_faction_id is: DifficultyDef.new()'s defaults are already
+## neutral, so a battle built with no difficulty context (e.g. an older
+## test fixture) behaves exactly like Normal.
+var difficulty: DifficultyDef = DifficultyDef.new()
 
 func request_retreat(squad_id: StringName) -> bool:
 	var squad := squad_states_by_id.get(squad_id) as BattleSquadState
@@ -116,6 +121,36 @@ func _environment_aptitude(unit_def: UnitDef) -> GameEnums.EnvironmentAptitude:
 		GameEnums.EnvironmentType.GROUND: return unit_def.ground_aptitude
 		GameEnums.EnvironmentType.MOON: return unit_def.moon_aptitude
 		_: return unit_def.space_aptitude
+
+
+## UNIT_DETAIL_SPECIFICATION.md section 6: a unit's own environment aptitude
+## adds to its own accuracy when attacking and its own evasion when
+## defending -- symmetric with how GameConstants.APTITUDE_MOVE_MULTIPLIERS
+## already works for battlefield speed. PROFICIENT +10, STANDARD +0, POOR
+## -10 for both.
+func environment_aptitude_accuracy_add(unit_def: UnitDef) -> int:
+	return GameConstants.APTITUDE_ACCURACY_ADDITIONS[_environment_aptitude(unit_def)]
+
+func environment_aptitude_evasion_add(unit_def: UnitDef) -> int:
+	return GameConstants.APTITUDE_EVASION_ADDITIONS[_environment_aptitude(unit_def)]
+
+
+## DATA_DEFINITION.md section 5: DifficultyDef's enemy_* fields only ever
+## scale factions other than the player's own.
+func is_enemy_faction(faction_id: StringName) -> bool:
+	return faction_id != player_faction_id
+
+func hp_multiplier(faction_id: StringName) -> float:
+	return difficulty.enemy_hp_multiplier if is_enemy_faction(faction_id) else 1.0
+
+func firepower_multiplier(faction_id: StringName) -> float:
+	return difficulty.enemy_firepower_multiplier if is_enemy_faction(faction_id) else 1.0
+
+func accuracy_add(faction_id: StringName) -> int:
+	return difficulty.enemy_accuracy_add if is_enemy_faction(faction_id) else 0
+
+func evasion_add(faction_id: StringName) -> int:
+	return difficulty.enemy_evasion_add if is_enemy_faction(faction_id) else 0
 
 
 ## COMBAT_DETAIL_SPECIFICATION.md section 29: zones are simple circles (see

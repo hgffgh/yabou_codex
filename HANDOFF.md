@@ -517,31 +517,54 @@ siege_cannon's 60m minimum before it ever got to fire at all; fixed by
 giving both squads DEFENSIVE for that test instead (mutual withdrawal, with
 comfortable margin under the weapon's 300m max for the test's duration) —
 not a bug, just this mechanic's first real interaction with an existing
-fixture. The remaining gaps, in rough order of value:
+fixture.
+
+Difficulty (DATA_DEFINITION.md section 5), environment-aptitude accuracy/
+evasion (UNIT_DETAIL_SPECIFICATION.md section 6), and a simplified tech
+gift (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) are all implemented.
+A new `DifficultyDef` (`res://data/difficulties/`: `easy`/`normal`/`hard`)
+scales non-player factions only — `enemy_income_multiplier` in
+`TurnManager._run_income_phase`, `enemy_hp_multiplier` applied once when
+`BattleRuntimeFactory._build_side` snapshots a non-player unit's max/current
+HP, and `enemy_firepower_multiplier`/`enemy_accuracy_add`/`enemy_evasion_add`
+read live in `BattleCombatSystem._resolve_attack` via new accessors on
+`BattleRuntimeState` (`hp_multiplier`/`firepower_multiplier`/`accuracy_add`/
+`evasion_add`, all keyed off `is_enemy_faction`). `GameState.start_new_game`/
+`TurnManager.start_new_game` both take an optional `difficulty_id` (default
+`"normal"`, so none of the ~30 existing call sites needed touching),
+falling back to Normal for an unresolved id; `difficulty_id` round-trips
+through save/load and a picker was added to the faction-select screen.
+`ai_profile_id` is schema-only — there's no AI behavior-profile system to
+select between yet, just the single non-parameterized `AiController`.
+Environment aptitude's accuracy/evasion bonuses (previously unwired, same
+gap the terrain-zone milestone left for its move-speed counterpart) are now
+read the same way: `BattleRuntimeState.environment_aptitude_accuracy_add`/
+`environment_aptitude_evasion_add`, folded into the same accuracy formula
+right alongside the difficulty additions. `Diplomacy.gift_tech` is a
+deliberately simplified stand-in for the real spec (which registers a
+gifted tech as an extra research candidate at normal Tier cost/duration —
+needs the generated tech-node system DATA_DEFINITION.md targets, which
+doesn't exist yet on top of today's flat, sequential `Faction.tech_tier`):
+it instead completes the receiver's next tier immediately and for free,
+gated on the giver already having researched at least that far so a gift
+can never hand over tech nobody in the campaign has, sharing
+`gift_resources`' cooldown and friendship gain. This was an explicit,
+user-approved scope tradeoff — see `Diplomacy`'s class doc comment. The
+remaining gaps, in rough order of value:
 
 1. The event system (`EventDef`, main/sub events, dialogue UI, and a
    condition evaluator) remains schema-only — it was explicitly scoped out
    of the diplomacy milestone above as its own, much larger undertaking.
-2. Tech gifting (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) was
-   scoped out of the diplomacy milestone above: it needs a
-   research-candidate/tech-node system that doesn't exist yet (the current
-   `Faction.tech_tier` is still the flat five-cost-tier placeholder, not
-   the generated tech-node graph DATA_DEFINITION.md targets), so there is
-   nowhere for a gifted candidate to be registered. `Diplomacy` and
-   `RelationState` are otherwise ready for it (same gift cooldown).
-3. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
+2. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
    placeholder in `GameState._apply_battle_pilot_exp` — there is no
    `ProfileState`/achievement system to source it from yet. Autosave
    (see the save/load milestone above) is in the same boat: there is no
    `manual_save_slots`/`autosave_slots` split to drive it from yet either.
-4. No `DifficultyDef`/difficulty system exists at all (`GameEnums.Difficulty`
-   is declared but nothing reads it, and the save schema's `difficulty_id`
-   is correspondingly omitted from the save/load milestone above).
-5. Environment-aptitude accuracy/evasion bonuses (`GameConstants.
-   APTITUDE_ACCURACY_ADDITIONS`/`APTITUDE_EVASION_ADDITIONS`) remain
-   unwired, same as the move-speed multiplier was before the terrain-zone
-   milestone above — out of scope there since that spec section only
-   called for the speed term.
+3. The real tech-node/research-candidate system itself (DATA_DEFINITION.md
+   sections 15/15.1/15.2): a generated ~30-node, 5-tier graph per campaign
+   with prerequisite/reachability validation, replacing `Faction.tech_tier`.
+   `gift_tech` above would be worth revisiting once this lands, to register
+   a real candidate instead of insta-completing a tier.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -848,6 +871,24 @@ at `res://data/units/` is now the only unit-definition path.
   cooldown fields directly instead of passing a large delta when a test
   wants to inspect a freshly-formed engagement's just-seeded distance
   before anything has had a chance to move it.
+- Run `res://tests/combat_modifiers_test.gd` for the difficulty registry
+  loading all 3 presets, `current_difficulty()` falling back to neutral for
+  an unresolved `difficulty_id`, `start_new_game` validating it (accepting
+  a real one, falling back to `"normal"` for a bad one), `difficulty_id`
+  round-tripping through save/load, `enemy_hp_multiplier` scaling only the
+  non-player unit in a real built battle, and the
+  `hp_multiplier`/`firepower_multiplier`/`accuracy_add`/`evasion_add`/
+  environment-aptitude accessors all returning the right values in
+  isolation (no RNG-roll integration test — these compose into the
+  accuracy/damage formula the same way `_cover_evasion_bonus` already did
+  in `terrain_zone_test.gd`, and direct accessor tests were preferred there
+  too over hunting for a specific seed).
+- `diplomacy_test.gd` gained `_test_gift_tech_advances_receivers_tier_once`
+  covering the giver-must-be-ahead gate, the receiver-mid-research gate,
+  the receiver-at-max-tier gate, the shared cooldown/friendship gain with
+  `gift_resources`, and that a second gift is naturally rejected once the
+  receiver catches up (no explicit per-tier dedup bookkeeping needed, since
+  `tech_tier` only ever increases).
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type

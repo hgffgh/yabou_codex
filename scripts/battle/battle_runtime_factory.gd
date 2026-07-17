@@ -31,6 +31,7 @@ func create_from_pending(
 		state.pilot_skill_defs = game_state.master_data.pilot_skills
 		state.support_skill_defs = game_state.master_data.support_skills
 		state.player_faction_id = game_state.player_faction_id
+		state.difficulty = game_state.current_difficulty()
 	if battle_map != null:
 		state.battle_map_id = battle_map.id
 		state.attacker_hq_id = battle_map.attacker_hq_id
@@ -111,6 +112,10 @@ func _build_side(state: BattleRuntimeState, ids: Array[StringName], campaign: Ca
 		battle_squad.leader_command = 100
 		battle_squad.unit_instance_ids = strategic.unit_instance_ids.duplicate()
 		state.squad_states_by_id[battle_squad.squad_id] = battle_squad
+		# DATA_DEFINITION.md section 5: enemy_hp_multiplier scales both max
+		# and current HP by the same factor, preserving whatever damage
+		# ratio the campaign-layer unit already had.
+		var hp_multiplier := state.hp_multiplier(strategic.owner_faction_id)
 		for unit_id: StringName in strategic.unit_instance_ids:
 			var strategic_unit := campaign.get_unit(unit_id)
 			var battle_unit := BattleUnitState.new()
@@ -119,13 +124,13 @@ func _build_side(state: BattleRuntimeState, ids: Array[StringName], campaign: Ca
 			battle_unit.pilot_id = strategic_unit.pilot_id
 			battle_unit.squad_id = strategic.squad_id
 			battle_unit.slot_index = strategic_unit.slot_index
-			battle_unit.initial_hp = strategic_unit.current_hp
+			battle_unit.initial_hp = roundi(float(strategic_unit.current_hp) * hp_multiplier)
 			battle_unit.initial_en = strategic_unit.current_en
-			battle_unit.current_hp = strategic_unit.current_hp
+			battle_unit.current_hp = battle_unit.initial_hp
 			battle_unit.current_en = strategic_unit.current_en
 			var unit_def := state.unit_defs.get(strategic_unit.unit_def_id) as UnitDef
 			if unit_def != null:
-				battle_unit.max_hp = unit_def.max_hp
+				battle_unit.max_hp = roundi(float(unit_def.max_hp) * hp_multiplier)
 				battle_unit.max_en = unit_def.max_en
 			var pilot_def := state.pilot_defs.get(strategic_unit.pilot_id) as PilotDef
 			if pilot_def != null:

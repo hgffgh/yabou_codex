@@ -26,6 +26,7 @@ var turn_number: int = 1
 var factions: Dictionary = {}  # StringName -> Faction
 var regions: Dictionary = {}   # StringName -> Region
 var player_faction_id: StringName = &""
+var difficulty_id: StringName = &"normal"
 var is_game_over: bool = false
 var last_game_over_reason: String = ""
 var last_game_over_standings: Array = []
@@ -63,10 +64,11 @@ func _load_resources_in_dir(path: String) -> Dictionary:
 	dir.list_dir_end()
 	return result
 
-func start_new_game(chosen_player_faction_id: StringName) -> void:
+func start_new_game(chosen_player_faction_id: StringName, chosen_difficulty_id: StringName = &"normal") -> void:
 	turn_number = 1
 	is_game_over = false
 	player_faction_id = chosen_player_faction_id
+	difficulty_id = chosen_difficulty_id if master_data.difficulties.has(chosen_difficulty_id) else &"normal"
 	campaign_runtime.reset()
 	factions.clear()
 	regions.clear()
@@ -89,6 +91,14 @@ func start_new_game(chosen_player_faction_id: StringName) -> void:
 func advance_turn() -> void:
 	turn_number += 1
 	turn_advanced.emit(turn_number)
+
+## DATA_DEFINITION.md section 5: scales non-player ("enemy") factions only.
+## Falls back to a neutral (Normal-equivalent) DifficultyDef if difficulty_id
+## somehow doesn't resolve (e.g. a save predating this system, or a missing
+## data file), so gameplay degrades gracefully instead of crashing.
+func current_difficulty() -> DifficultyDef:
+	var difficulty := master_data.difficulties.get(difficulty_id) as DifficultyDef
+	return difficulty if difficulty != null else DifficultyDef.new()
 
 ## DATA_DEFINITION.md section 26: everything a manual save needs from
 ## GameState's side (TurnManager.to_save_dict covers the turn-order/phase
@@ -120,6 +130,7 @@ func to_save_dict() -> Dictionary:
 	return {
 		"turn_number": turn_number,
 		"player_faction_id": player_faction_id,
+		"difficulty_id": difficulty_id,
 		"is_game_over": is_game_over,
 		"faction_states": faction_states,
 		"region_states": region_states,
@@ -197,6 +208,8 @@ func apply_save_dict(data: Dictionary) -> PackedStringArray:
 
 	turn_number = maxi(1, int(data.get("turn_number", 1)))
 	player_faction_id = player_id
+	var saved_difficulty_id := StringName(data.get("difficulty_id", "normal"))
+	difficulty_id = saved_difficulty_id if master_data.difficulties.has(saved_difficulty_id) else &"normal"
 	is_game_over = bool(data.get("is_game_over", false))
 	factions = new_factions
 	for faction_id: StringName in factions:

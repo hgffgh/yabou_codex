@@ -19,7 +19,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	for category: StringName in [
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
-		&"battle_maps", &"battle_control_points", &"terrain_zones",
+		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties",
 	]:
 		_validate_ids(category, registry.get_category(category))
 	_validate_global_id_uniqueness(registry)
@@ -33,6 +33,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	_validate_battle_control_points(registry)
 	_validate_terrain_zones(registry)
 	_validate_battle_maps(registry)
+	_validate_difficulties(registry)
 	_errors.sort()
 	return _errors.duplicate()
 
@@ -42,7 +43,7 @@ func _validate_global_id_uniqueness(registry: MasterDataRegistry) -> void:
 	for category: StringName in [
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
-		&"battle_maps", &"battle_control_points", &"terrain_zones",
+		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties",
 	]:
 		for id_value: Variant in registry.get_category(category):
 			var id := StringName(id_value)
@@ -247,6 +248,17 @@ func _validate_battle_maps(registry: MasterDataRegistry) -> void:
 		_references(item, &"terrain_zone_ids", &"terrain_zones", registry.terrain_zones, &"battle_maps", id)
 		if item.get("attacker_hq_id") == item.get("defender_hq_id"): _error(&"battle_maps", id, "headquarters IDs must differ")
 		if NodePath(item.get("navigation_region_path")).is_empty(): _error(&"battle_maps", id, "navigation_region_path must not be empty")
+
+
+func _validate_difficulties(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.difficulties):
+		var item: Resource = registry.difficulties[id]
+		_min_float(item, &"enemy_income_multiplier", 0.000001, &"difficulties", id)
+		_min_float(item, &"enemy_hp_multiplier", 0.000001, &"difficulties", id)
+		_min_float(item, &"enemy_firepower_multiplier", 0.000001, &"difficulties", id)
+		_range_int(item, &"enemy_accuracy_add", -50, 50, &"difficulties", id)
+		_range_int(item, &"enemy_evasion_add", -50, 50, &"difficulties", id)
+		_require_key(item, &"ai_profile_id", &"difficulties", id)
 
 
 func _reference(item: Resource, field: StringName, target_name: StringName, target: Dictionary, category: StringName, id: StringName) -> void:

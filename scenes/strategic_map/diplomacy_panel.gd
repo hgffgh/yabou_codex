@@ -150,6 +150,17 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	gift_materials_button.pressed.connect(_on_gift_pressed.bind(other_id, 0, GameConstants.MIN_GIFT_MATERIALS))
 	actions_row.add_child(gift_materials_button)
 
+	var other_faction := GameState.get_faction(other_id)
+	var tech_gift_button := Button.new()
+	tech_gift_button.text = "技術贈与"
+	tech_gift_button.custom_minimum_size = Vector2(90, 36)
+	var max_tier: int = GameState.campaign_config.research_costs.size()
+	tech_gift_button.disabled = not can_act or relation.gift_cooldown_turns > 0 \
+		or other_faction == null or other_faction.research_in_progress \
+		or faction.tech_tier <= other_faction.tech_tier or other_faction.tech_tier >= max_tier
+	tech_gift_button.pressed.connect(_on_tech_gift_pressed.bind(other_id))
+	actions_row.add_child(tech_gift_button)
+
 	section.add_child(actions_row)
 	section.add_child(HSeparator.new())
 	return section
@@ -201,6 +212,14 @@ func _on_gift_pressed(other_id: StringName, funds: int, materials: int) -> void:
 		_status_label.text = "贈与に失敗しました: %s" % errors[0]
 	else:
 		_status_label.text = "贈与しました。"
+
+func _on_tech_gift_pressed(other_id: StringName) -> void:
+	var errors := Diplomacy.gift_tech(GameState, _faction_id, other_id)
+	_refresh()
+	if not errors.is_empty():
+		_status_label.text = "技術贈与に失敗しました: %s" % errors[0]
+	else:
+		_status_label.text = "技術を贈与しました。"
 
 func _on_close_pressed() -> void:
 	closed.emit()

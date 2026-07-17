@@ -23,6 +23,7 @@ func _initialize() -> void:
 	_test_active_treaty_blocks_invasion_movement()
 	_test_break_treaty_penalizes_the_breaker_only()
 	_test_gift_resources_requires_minimum_and_applies_cooldown()
+	_test_gift_tech_advances_receivers_tier_once()
 	_test_purchase_intel_transfers_only_confirmed_squads()
 	_test_ransom_captured_unit_returns_it_to_the_original_faction()
 	_finish()
@@ -213,6 +214,52 @@ func _test_gift_resources_requires_minimum_and_applies_cooldown() -> void:
 
 	var cooldown_errors := Diplomacy.gift_resources(game_state, &"nova_republic", &"crimson_empire", GameConstants.MIN_GIFT_FUNDS, 0)
 	_check(not cooldown_errors.is_empty(), "gifting again immediately should be blocked by the shared 5-turn cooldown")
+
+
+## gift_tech is a simplified stand-in for section 11.6 (see Diplomacy's
+## class doc comment): it advances the receiver's flat tech_tier by exactly
+## one instead of registering a real research candidate, gated on the giver
+## already being at least one tier ahead so a gift can never hand over tech
+## nobody in the campaign has researched.
+func _test_gift_tech_advances_receivers_tier_once() -> void:
+	turn_manager.start_new_game(&"nova_republic")
+	var nova: Faction = game_state.get_faction(&"nova_republic")
+	var crimson: Faction = game_state.get_faction(&"crimson_empire")
+	var max_tier: int = game_state.campaign_config.research_costs.size()
+
+	var not_ahead_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
+	_check(not not_ahead_errors.is_empty(), "a giver at the same tier as the receiver should be rejected")
+
+	nova.tech_tier = 1
+	var relation: RelationState = game_state.campaign_runtime.get_relation_state(&"nova_republic", &"crimson_empire")
+	var friendship_before: int = relation.friendship
+	_check(crimson.tech_tier == 0, "setup: receiver should start at tier 0")
+
+	var errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
+	_check(errors.is_empty(), "a well-formed tech gift should succeed: %s" % [errors])
+	_check(crimson.tech_tier == 1, "tech gift should advance the receiver's tier by exactly one, got %d" % crimson.tech_tier)
+	_check(nova.tech_tier == 1, "the giver's own tier must be unaffected by gifting")
+	_check(relation.friendship == friendship_before + GameConstants.GIFT_FRIENDSHIP_GAIN,
+		"tech gift should apply the same fixed +5 friendship gain as a resource gift")
+	_check(relation.gift_cooldown_turns == GameConstants.DIPLOMACY_GIFT_COOLDOWN_TURNS,
+		"tech gift should set the shared gift cooldown")
+
+	var blocked_resource_gift := Diplomacy.gift_resources(game_state, &"nova_republic", &"crimson_empire", GameConstants.MIN_GIFT_FUNDS, 0)
+	_check(not blocked_resource_gift.is_empty(), "a resource gift should be blocked by the cooldown a tech gift just set, since they share one pool")
+
+	relation.gift_cooldown_turns = 0
+	var same_tier_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
+	_check(not same_tier_errors.is_empty(), "once the receiver catches up to the giver's tier, a second gift should fail")
+
+	nova.tech_tier = 2
+	crimson.research_in_progress = true
+	var mid_research_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
+	_check(not mid_research_errors.is_empty(), "a receiver with research already in progress must not receive a tech gift")
+	crimson.research_in_progress = false
+
+	crimson.tech_tier = max_tier
+	var maxed_receiver_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
+	_check(not maxed_receiver_errors.is_empty(), "a receiver already at the maximum tier must not receive a tech gift")
 
 
 ## No FactionDef exists for a third distinct faction in the current dataset,

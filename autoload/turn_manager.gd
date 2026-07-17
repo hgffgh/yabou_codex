@@ -57,11 +57,11 @@ func _advance_research(faction_id: StringName) -> void:
 		faction.research_in_progress = false
 		research_completed.emit(faction_id, faction.tech_tier)
 
-func start_new_game(player_faction_id: StringName) -> void:
+func start_new_game(player_faction_id: StringName, difficulty_id: StringName = &"normal") -> void:
 	is_resolving_turn = false
 	pending_battle_states.clear()
 	next_battle_serial = 1
-	GameState.start_new_game(player_faction_id)
+	GameState.start_new_game(player_faction_id, difficulty_id)
 	_build_faction_turn_order(player_faction_id)
 	active_faction_index = 0
 	_begin_faction_turn()
