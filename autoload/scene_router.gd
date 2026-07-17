@@ -22,7 +22,14 @@ func _ready() -> void:
 
 	_fade_rect = ColorRect.new()
 	_fade_rect.color = Color(0, 0, 0, 0)
-	_fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	## MOUSE_FILTER_STOP consumes every click under this rect regardless of
+	## its alpha -- transparency only affects rendering, not hit-testing.
+	## Left at STOP permanently, this invisible full-screen overlay would
+	## silently swallow all mouse input across the entire game forever (a
+	## real bug this comment is here specifically to prevent regressing):
+	## IGNORE except during the brief fade window itself, when blocking
+	## input to avoid a double-click mid-transition is actually the intent.
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fade_layer.add_child(_fade_rect)
 	UIUtils.fill_parent(_fade_rect)
 
@@ -39,6 +46,7 @@ func goto_results() -> void:
 	_change_scene(RESULTS_SCREEN)
 
 func _change_scene(path: String) -> void:
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 	var tween := create_tween()
 	tween.tween_property(_fade_rect, "color:a", 1.0, FADE_OUT_TIME)
 	await tween.finished
@@ -46,3 +54,5 @@ func _change_scene(path: String) -> void:
 	await get_tree().process_frame
 	var tween_in := create_tween()
 	tween_in.tween_property(_fade_rect, "color:a", 0.0, FADE_IN_TIME)
+	await tween_in.finished
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE

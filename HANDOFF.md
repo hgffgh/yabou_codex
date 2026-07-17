@@ -533,8 +533,8 @@ read live in `BattleCombatSystem._resolve_attack` via new accessors on
 `"normal"`, so none of the ~30 existing call sites needed touching),
 falling back to Normal for an unresolved id; `difficulty_id` round-trips
 through save/load and a picker was added to the faction-select screen.
-`ai_profile_id` is schema-only — there's no AI behavior-profile system to
-select between yet, just the single non-parameterized `AiController`.
+`ai_profile_id` was schema-only at the time this milestone landed — see the
+AI behavior profiles paragraph further down for the system that now reads it.
 Environment aptitude's accuracy/evasion bonuses (previously unwired, same
 gap the terrain-zone milestone left for its move-speed counterpart) are now
 read the same way: `BattleRuntimeState.environment_aptitude_accuracy_add`/
@@ -600,8 +600,10 @@ as a single cutover across data/state/UI/AI rather than staged):
 
 - `TechDef` was rewritten to match DATA_DEFINITION.md section 15 exactly
   (origin faction, tier, category, `mandatory_base_tech`, `giftable`, plus
-  schema-only `unlocks_unit_ids`/`unlocks_skill_ids`/`capture_unlockable`/
-  `encyclopedia_unlockable` for systems that don't gate on them yet). New
+  `unlocks_unit_ids`/`unlocks_skill_ids`/`capture_unlockable`/
+  `encyclopedia_unlockable` — all schema-only at the time this milestone
+  landed; `unlocks_unit_ids` now gates production, see the tech-gated
+  production paragraph further down). New
   `GeneratedTechNodeState` (node_id, tech_id, tier, prerequisites, gifted,
   researched) and `ResearchState` (node_id, funds_paid, turns_remaining)
   back `Faction.generated_tech_nodes`/`current_research`, replacing the
@@ -929,6 +931,38 @@ no actual effect on strategic gameplay.
   has no `TurnManager` instance to drive a real research cycle through) --
   a straightforward extra setup step, not a sign the original test design
   was wrong.
+
+**Critical bug found and fixed: every mouse click in the entire game was
+silently discarded, from the moment the game booted.** Found by actually
+launching the windowed build and trying to click the main menu's own
+"キャンペーン開始" button — nothing happened, for a real mouse click just as
+much as for a simulated one, which is what pointed at the click delivery
+itself rather than any one screen's logic. Root cause: `SceneRouter`
+(autoload, `res://autoload/scene_router.gd`) owns a persistent, full-screen,
+fully transparent `ColorRect` on a high `CanvasLayer` for its fade-to-black
+scene transitions, and left it at `mouse_filter = MOUSE_FILTER_STOP`
+permanently. `MOUSE_FILTER_STOP` consumes every click under a `Control`'s
+rect regardless of its alpha — transparency only changes what's rendered,
+not what's hit-tested — so this invisible overlay sat on top of every
+scene, everywhere, forever, and ate every click before it ever reached a
+button underneath. Fixed by defaulting the rect to `MOUSE_FILTER_IGNORE`
+and only switching it to `MOUSE_FILTER_STOP` for the brief actual fade
+window in `_change_scene` (where blocking input to avoid a double-click
+mid-transition is the real, intended behavior), switching it back once the
+fade-in tween finishes. Confirmed fixed by relaunching the windowed build
+and clicking through from the main menu to the faction-select screen.
+This is also a real gap in this project's testing story worth naming
+plainly: every test in `res://tests/` runs `--headless --script` and drives
+game logic directly (calling functions, connecting to signals, invoking
+`_pressed`-style handlers programmatically) — none of them dispatch an
+actual `InputEventMouseButton` through Godot's real input pipeline the way
+a live click does, so a bug purely in *click delivery* itself (as opposed
+to what a click's handler does once invoked) is invisible to the entire
+automated suite by construction. No headless regression test was added for
+this fix, because no such test exists as a pattern anywhere in this
+codebase to extend — that would be a new kind of test infrastructure this
+project doesn't currently have (an interactive/`InputEventMouseButton`-
+injecting harness), not a gap in an existing one.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
