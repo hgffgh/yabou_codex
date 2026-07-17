@@ -375,11 +375,11 @@ final design.
 
 | Current prototype | Required target |
 | --- | --- |
-| One generic `resources` currency | Production uses funds/materials; legacy research still uses `resources` |
+| One generic `resources` currency | Production and research both use funds/materials; `Faction.resources` is now a fully unused legacy field |
 | — (removed; `UnitStack`/`CombatResolver` deleted as unreachable) | Production, movement, and combat all use `UnitInstanceState`/`SquadState`/`BattleRuntimeState` |
 | No five-unit squad slots | `SquadState` is implemented with 3 front and 2 rear slots and is fully wired into movement, production, and combat |
 | Unit type has attack/defense only | New unit, weapon, aptitude, resistance, and support Resources now coexist with the prototype |
-| Faction-wide integer tech tier | Generated five-tier technology-node graph |
+| — (implemented; see below) | Generated five-tier technology-node graph per faction, replacing the old flat `Faction.tech_tier` |
 | Parallel per-unit production timers | Replaced by facility FIFO production-power queues |
 | Ratio-based instant combat | Free-movement RTS plus 30-second combat rounds |
 | One combined turn loop | Fixed faction turns with strategy and combat phases |
@@ -519,9 +519,8 @@ comfortable margin under the weapon's 300m max for the test's duration) —
 not a bug, just this mechanic's first real interaction with an existing
 fixture.
 
-Difficulty (DATA_DEFINITION.md section 5), environment-aptitude accuracy/
-evasion (UNIT_DETAIL_SPECIFICATION.md section 6), and a simplified tech
-gift (STRATEGY_DETAIL_SPECIFICATION.md section 11.6) are all implemented.
+Difficulty (DATA_DEFINITION.md section 5) and environment-aptitude accuracy/
+evasion (UNIT_DETAIL_SPECIFICATION.md section 6) are both implemented.
 A new `DifficultyDef` (`res://data/difficulties/`: `easy`/`normal`/`hard`)
 scales non-player factions only — `enemy_income_multiplier` in
 `TurnManager._run_income_phase`, `enemy_hp_multiplier` applied once when
@@ -540,31 +539,132 @@ Environment aptitude's accuracy/evasion bonuses (previously unwired, same
 gap the terrain-zone milestone left for its move-speed counterpart) are now
 read the same way: `BattleRuntimeState.environment_aptitude_accuracy_add`/
 `environment_aptitude_evasion_add`, folded into the same accuracy formula
-right alongside the difficulty additions. `Diplomacy.gift_tech` is a
-deliberately simplified stand-in for the real spec (which registers a
-gifted tech as an extra research candidate at normal Tier cost/duration —
-needs the generated tech-node system DATA_DEFINITION.md targets, which
-doesn't exist yet on top of today's flat, sequential `Faction.tech_tier`):
-it instead completes the receiver's next tier immediately and for free,
-gated on the giver already having researched at least that far so a gift
-can never hand over tech nobody in the campaign has, sharing
-`gift_resources`' cooldown and friendship gain. This was an explicit,
-user-approved scope tradeoff — see `Diplomacy`'s class doc comment. The
-remaining gaps, in rough order of value:
+right alongside the difficulty additions.
+
+The achievement/profile and autosave milestone (DATA_DEFINITION.md sections
+9/9.1, SYSTEM_DETAIL_SPECIFICATION.md section 2.1) is complete, scoped down
+to what the current data model actually needs — see the explicit deferrals
+below:
+
+- New `AchievementDef` (`res://data/achievements/`, 7 sample entries) and
+  `ProfileState` (`res://scripts/state/profile_state.gd`), trimmed to just
+  `achievement_ids`/`permanent_exp_bonus_pct` — `ProfileState`'s other
+  DATA_DEFINITION.md fields (encyclopedia entries, unlocked tech candidates,
+  viewed events, settings) all need systems that don't exist yet or are
+  unrelated UI settings, so they were left out rather than stubbed.
+  `GameState.profile` persists to `user://profile.json` (separate from any
+  campaign save — it survives across campaigns, matching the spec), loaded
+  once at `_ready()`.
+- `GameState.evaluate_achievements()` runs `_achievement_condition_met`
+  against every `AchievementDef` and is called from `TurnManager._end_game`
+  whenever the new `GameState.did_player_win()` (uniform across the
+  capital-capture/region-threshold/turn-cap game-over reasons) is true. Five
+  `condition_type`s are supported: `faction_clear`, `difficulty_clear`,
+  `turn_limit_clear`, `capture_count` (new `Faction.total_units_captured`),
+  and `treaty_count` (derived by scanning `campaign_runtime.diplomacy_log`
+  for the player's successful treaty proposals — no new counter needed).
+  `ProfileState.recalculate_bonus` always recomputes the permanent EXP bonus
+  from `achievement_ids` rather than trusting a stored value, and
+  `GameState._apply_battle_pilot_exp` now reads it for the player's own
+  pilots only (never AI pilots), replacing the old hardcoded `0.0`
+  placeholder. `ResultsScreen` shows any achievements unlocked that game.
+- Autosave: `TurnManager` now writes to one of 3 rotating
+  `user://saves/autosave_NN.json` slots (oldest-or-empty replaced) at the
+  start of each faction's turn and again right before combat resolution,
+  matching SYSTEM_DETAIL_SPECIFICATION.md section 2.1's two triggers
+  exactly. It's best-effort and bypasses `can_save_now()` — that gate exists
+  specifically to stop player save-scumming during their own orders phase,
+  not because other phases are unsafe to serialize. `save_game`/`load_game`/
+  `list_save_slots`/`_read_save_summary` all gained an `auto: bool = false`
+  parameter routing between the manual and autosave slot namespaces.
+  `SaveLoadPanel` gained a load-only autosave section.
+- Found and fixed a real test-isolation bug while building this: several
+  `achievements_profile_test.gd` cases called `evaluate_achievements()`,
+  which persists to the real `user://profile.json` — since that file
+  survives across separate `--script` process invocations (unlike in-memory
+  state), it leaked into a *later*, unrelated `pilot_progression_test.gd`
+  run in the same full-suite sweep and inflated its EXP assertions. Fixed by
+  snapshotting/restoring the real profile file around the whole test file's
+  execution in `_initialize()`.
+- Deferred: the full `CampaignConfig.manual_save_slots`/`autosave_slots`
+  schema split from DATA_DEFINITION.md — the slot *count* (3) is hardcoded
+  as `TurnManager.AUTOSAVE_SLOT_COUNT` rather than read from config, since
+  `resources/campaign_config.gd` doesn't model that schema yet.
+
+The real generated tech-node/research system (DATA_DEFINITION.md sections
+15/15.1/15.2, STRATEGY_DETAIL_SPECIFICATION.md section 7) is complete,
+replacing both the old flat `Faction.tech_tier` placeholder and the earlier
+simplified `Diplomacy.gift_tech` in one pass (a half-migrated system would
+leave two parallel and inconsistent tech representations, so this was done
+as a single cutover across data/state/UI/AI rather than staged):
+
+- `TechDef` was rewritten to match DATA_DEFINITION.md section 15 exactly
+  (origin faction, tier, category, `mandatory_base_tech`, `giftable`, plus
+  schema-only `unlocks_unit_ids`/`unlocks_skill_ids`/`capture_unlockable`/
+  `encyclopedia_unlockable` for systems that don't gate on them yet). New
+  `GeneratedTechNodeState` (node_id, tech_id, tier, prerequisites, gifted,
+  researched) and `ResearchState` (node_id, funds_paid, turns_remaining)
+  back `Faction.generated_tech_nodes`/`current_research`, replacing the
+  removed `tech_tier`/`research_in_progress`/`research_turns_remaining`.
+- New `TechTreeGenerator.generate_for_faction` builds each faction's 5-tier
+  tree at `start_new_game` time, seeded from the same persisted
+  `GameState.campaign_rng` diplomacy already uses: every faction's
+  `mandatory_base_tech` techs are always placed at their tier, and the rest
+  of each tier is filled by a deterministic Fisher-Yates draw (`Array.
+  shuffle()` doesn't take a custom RNG) from the full non-mandatory tech
+  pool, with 1-2 prerequisite links drawn from the tier below.
+  `TARGET_NODES_PER_TIER = 3` (scaled down from the spec's "~6" to match the
+  smaller sample dataset actually authored — 10 `TechDef`s total). Explicit
+  scope tradeoff: DATA_DEFINITION.md's permanently-unlocked-candidate pool
+  (a campaign-spanning set grown by an encyclopedia/capture-analysis system
+  that doesn't exist yet) isn't modeled — every non-mandatory tech is always
+  eligible for any faction's draw.
+- `TurnManager.start_research(faction_id, node_id) -> PackedStringArray`
+  (previously `start_research(faction_id) -> bool`) validates the node
+  exists, is unresearched, and has its prerequisites met, then deducts cost
+  from `faction.funds` — this also fixed a real currency bug: the old
+  implementation deducted from the legacy `faction.resources` even though
+  STRATEGY_DETAIL_SPECIFICATION.md section 7.3 specifies funds. A gifted
+  node uses a different prerequisite rule than a naturally-drawn one (any
+  researched node one tier down, not a specific `prerequisite_node_ids`
+  link) via `_node_prerequisites_met`. `_research_discount_pct` (5% per
+  owned RESEARCH-type facility, capped 25%) wires up the previously-dormant
+  `FacilityDef.research_discount_pct` field — currently always 0% since no
+  RESEARCH facility instance exists in the map data yet, but the formula
+  itself is real and correct once one is added. `_advance_research` and the
+  `research_completed(faction_id, tech_id)` signal (signature changed from
+  `(faction_id, new_tier: int)`) were updated to match.
+- `Diplomacy.gift_tech(game_state, giver_id, receiver_id, giver_node_id)`
+  (gained a required 4th parameter) now implements the real spec behavior
+  instead of the earlier tier-insta-complete stand-in: validates the
+  giver's node is researched and `TechDef.giftable`, rejects a duplicate
+  gift of a tech_id the receiver already holds anywhere in their tree, and
+  creates a new `gifted = true` `GeneratedTechNodeState` on the receiver —
+  sharing `gift_resources`' cooldown and friendship gain, same as before.
+- `DevelopmentPanel` and `DiplomacyPanel`'s tech-gift button were rewritten
+  for the node-based model: the former lists every tree node grouped by
+  tier with researched/available/locked status and a start-research button;
+  the latter's tech-gift button became an `OptionButton` populated with
+  every giftable node the picker's own gift-eligibility check
+  (`_giftable_tech_nodes`) allows. Both smoke-tested by loading their
+  scripts dynamically via `load()` rather than the bare `DevelopmentPanel`/
+  `DiplomacyPanel` class_name identifiers — see the compile-order bug note
+  below, since referencing either class_name directly from a fresh
+  `--script` entry hits it (both scripts bare-reference `TurnManager`
+  internally).
+- Sample data: 10 `TechDef`s across the 5 tiers (`data/techs/`), replacing
+  the single obsolete `prototype_foundation.tres`, whose old schema
+  (`display_name`/`cost`) no longer matched the rewritten `TechDef` and
+  which every unit's `tech_id` pointed at — `nova_scout`/`nova_vanguard`/
+  `crimson_bastion` were repointed to new faction-specific
+  `mandatory_base_tech` entries (`nova_hull_foundation`/
+  `crimson_hull_foundation`).
+
+The remaining gap, in rough order of value:
 
 1. The event system (`EventDef`, main/sub events, dialogue UI, and a
    condition evaluator) remains schema-only — it was explicitly scoped out
    of the diplomacy milestone above as its own, much larger undertaking.
-2. The permanent profile EXP bonus (achievements) is a hardcoded `0.0`
-   placeholder in `GameState._apply_battle_pilot_exp` — there is no
-   `ProfileState`/achievement system to source it from yet. Autosave
-   (see the save/load milestone above) is in the same boat: there is no
-   `manual_save_slots`/`autosave_slots` split to drive it from yet either.
-3. The real tech-node/research-candidate system itself (DATA_DEFINITION.md
-   sections 15/15.1/15.2): a generated ~30-node, 5-tier graph per campaign
-   with prerequisite/reachability validation, replacing `Faction.tech_tier`.
-   `gift_tech` above would be worth revisiting once this lands, to register
-   a real candidate instead of insta-completing a tier.
 
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
@@ -883,12 +983,38 @@ at `res://data/units/` is now the only unit-definition path.
   accuracy/damage formula the same way `_cover_evasion_bonus` already did
   in `terrain_zone_test.gd`, and direct accessor tests were preferred there
   too over hunting for a specific seed).
-- `diplomacy_test.gd` gained `_test_gift_tech_advances_receivers_tier_once`
-  covering the giver-must-be-ahead gate, the receiver-mid-research gate,
-  the receiver-at-max-tier gate, the shared cooldown/friendship gain with
-  `gift_resources`, and that a second gift is naturally rejected once the
-  receiver catches up (no explicit per-tier dedup bookkeeping needed, since
-  `tech_tier` only ever increases).
+- `diplomacy_test.gd`'s tech-gift coverage was rewritten for the node-based
+  model: `_test_gift_tech_registers_a_new_gifted_node` (giver-must-have-
+  researched gate, `giftable == false` rejection, a successful gift creates
+  the right gifted node without touching the giver's own, shared cooldown/
+  friendship gain with `gift_resources`, and duplicate-tech_id rejection)
+  and `_test_gifted_node_uses_the_any_prior_tier_prerequisite_rule` (a
+  gifted tier-1 node is always available; a gifted tier-2+ node needs *any*
+  researched node one tier down, not a specific `prerequisite_node_ids`
+  link). Both use hand-built `GeneratedTechNodeState` fixtures rather than
+  `TechTreeGenerator`'s random output, to stay deterministic regardless of
+  `campaign_rng`'s seed.
+- Run `res://tests/achievements_profile_test.gd` for achievement unlocking
+  across all 5 `condition_type`s, `ProfileState.recalculate_bonus` always
+  recomputing from `achievement_ids` rather than trusting a stored value,
+  the permanent EXP bonus applying only to the player's own pilots, a
+  `user://profile.json` save/load round trip, and autosave slot rotation
+  (oldest-or-empty replaced, `auto: bool` correctly separating the manual
+  and autosave namespaces). Snapshots and restores the real profile file
+  around its own execution — see the note above about why.
+- Run `res://tests/tech_tree_test.gd` for `TechTreeGenerator.
+  generate_for_faction` (mandatory techs always placed at their tier and
+  never leak into another faction's tree, every generated node reachable,
+  no duplicate tech_ids, determinism under a fixed RNG seed) and
+  `TurnManager.start_research`/`_advance_research` (prerequisite gating,
+  funds deducted via the correct `faction.funds` currency, rejecting a
+  second concurrent research or insufficient funds, completion emitting
+  `research_completed` and clearing `current_research`). A GDScript
+  closure quirk surfaced while writing this: a lambda can read a captured
+  outer local but an assignment to it inside the lambda does not write
+  back to the outer scope — use a single-slot `Array` as a mutable box
+  instead when a signal-connected lambda needs to report a result back to
+  its caller.
 - Any new script declaring `class_name` needs a one-time
   `godot --headless --path . --import` before it resolves as a global type
   in other scripts — otherwise headless runs fail with "Could not find type
@@ -908,7 +1034,16 @@ at `res://data/units/` is now the only unit-definition path.
   `diplomacy_test.gd` for a test that exercises it directly, something no
   earlier test attempted). Prefer that parameter-passing approach over the
   restructure-the-test workaround whenever the class under test is the one
-  actually triggering the bug, rather than a bystander.
+  actually triggering the bug, rather than a bystander. For an ad hoc smoke
+  check that must instantiate one of these files directly (not just call a
+  static function on it), referencing its bare class_name at all — even
+  only for `.new()`, never mind a typed variable declaration — is enough to
+  trigger the bug, since GDScript eagerly resolves every identifier in a
+  referenced class's body at the *referencing* script's own parse time, not
+  at first execution. Load it dynamically instead:
+  `load("res://path/to/script.gd").new()`, then interact through
+  `Object.call()`/`.get()` rather than static typing — this is what the
+  `DevelopmentPanel`/`DiplomacyPanel` tech-tree smoke check above did.
 - Godot 4.7.1 is installed at
   `C:/Users/koyu9/local/godot/Godot_v4.7.1-stable_win64_console.exe` (not on
   PATH). All state/production tests, the strategic-map smoke test, and a

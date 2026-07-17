@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/achievement_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"three_treaties_in_run"
+display_name_key = &"achievement.three_treaties_in_run.name"
+description_key = &"achievement.three_treaties_in_run.description"
+condition_type = &"treaty_count"
+condition_payload = {
+"count": 3
+}
+exp_bonus_pct = 0.04

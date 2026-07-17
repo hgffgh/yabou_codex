@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/achievement_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"clear_normal"
+display_name_key = &"achievement.clear_normal.name"
+description_key = &"achievement.clear_normal.description"
+condition_type = &"difficulty_clear"
+condition_payload = {
+"difficulty_id": "normal"
+}
+exp_bonus_pct = 0.03

@@ -5,18 +5,6 @@ extends RefCounted
 ## ransom, and intel purchase, operating on a CampaignRuntimeState's
 ## relation_states.
 ##
-## gift_tech is a deliberately simplified stand-in for section 11.6: the
-## real spec registers a gifted tech as an extra research candidate the
-## receiver can still choose to research at the normal Tier cost/duration,
-## which needs the generated tech-node/research-candidate system
-## DATA_DEFINITION.md targets and this codebase doesn't have yet -- today's
-## Faction.tech_tier is still a flat, sequential counter with no per-tech
-## identity at all. Until that system exists, gift_tech instead completes
-## the receiver's next tier immediately and for free, gated on the giver
-## already having researched at least that far (so a gift can never hand
-## over tech nobody in the campaign actually has) -- see HANDOFF.md for the
-## full tradeoff.
-##
 ## Every function below takes `game_state` as an explicit first parameter
 ## instead of referencing the GameState autoload by its bare global
 ## identifier: a --script test entry point that reaches this class before
@@ -310,21 +298,34 @@ static func gift_resources(game_state: Node, giver_id: StringName, receiver_id: 
 ## extra bookkeeping here: since this always targets receiver_id's next
 ## tier and tech_tier only ever increases, a repeat gift naturally targets a
 ## tier one higher than the last, never the same one twice.
-static func gift_tech(game_state: Node, giver_id: StringName, receiver_id: StringName) -> PackedStringArray:
+## STRATEGY_DETAIL_SPECIFICATION.md section 11.6: gives receiver_id a new
+## gifted node for whatever tech giver_id's giver_node_id has already
+## researched. "贈与側は技術を失わない" -- the giver's own node is
+## untouched. "受取側では即時研究済みにせず...候補へ登録する" -- the
+## gifted node starts unresearched; TurnManager._node_prerequisites_met's
+## gifted-node branch handles "Tier 1は即時研究可能、Tier 2以上は直前Tierを
+## 1件以上研究済みで研究可能とする（個別の元前提技術は要求しない）".
+## "同じ技術を同じ勢力へ複数回贈与できない" is enforced by checking
+## receiver_id doesn't already have this tech_id anywhere in its tree.
+static func gift_tech(game_state: Node, giver_id: StringName, receiver_id: StringName, giver_node_id: StringName) -> PackedStringArray:
 	var errors := PackedStringArray()
 	var giver: Faction = game_state.get_faction(giver_id)
 	var receiver: Faction = game_state.get_faction(receiver_id)
 	if giver_id == receiver_id or giver == null or receiver == null:
 		errors.append("diplomacy: giver and receiver must be distinct, resolvable factions")
 		return errors
-
-	var max_tier: int = game_state.campaign_config.research_costs.size()
-	if receiver.tech_tier >= max_tier:
-		errors.append("diplomacy: receiver has already researched every available tier")
-	if giver.tech_tier <= receiver.tech_tier:
-		errors.append("diplomacy: giver has not researched a tier beyond the receiver's own")
-	if receiver.research_in_progress:
-		errors.append("diplomacy: receiver must not have research already in progress")
+	var giver_node: GeneratedTechNodeState = giver.generated_tech_nodes.get(giver_node_id)
+	if giver_node == null or not giver_node.researched:
+		errors.append("diplomacy: giver has not researched the selected tech")
+		return errors
+	var tech_def: TechDef = game_state.master_data.techs.get(giver_node.tech_id)
+	if tech_def == null or not tech_def.giftable:
+		errors.append("diplomacy: this tech cannot be gifted")
+		return errors
+	for existing_id: StringName in receiver.generated_tech_nodes:
+		if (receiver.generated_tech_nodes[existing_id] as GeneratedTechNodeState).tech_id == giver_node.tech_id:
+			errors.append("diplomacy: the receiver already has this tech in their tree")
+			return errors
 	var relation: RelationState = game_state.campaign_runtime.get_relation_state(giver_id, receiver_id)
 	if relation.gift_cooldown_turns > 0:
 		errors.append("diplomacy: gifting to this faction is on cooldown")
@@ -332,13 +333,19 @@ static func gift_tech(game_state: Node, giver_id: StringName, receiver_id: Strin
 		errors.sort()
 		return errors
 
-	receiver.tech_tier += 1
+	var new_node := GeneratedTechNodeState.new()
+	new_node.node_id = StringName("gift_%s_%s" % [receiver_id, giver_node.tech_id])
+	new_node.tech_id = giver_node.tech_id
+	new_node.tier = giver_node.tier
+	new_node.gifted = true
+	receiver.generated_tech_nodes[new_node.node_id] = new_node
+
 	relation.gift_cooldown_turns = GameConstants.DIPLOMACY_GIFT_COOLDOWN_TURNS
 	relation.friendship = clampi(
 		relation.friendship + GameConstants.GIFT_FRIENDSHIP_GAIN, GameConstants.FRIENDSHIP_MIN, GameConstants.FRIENDSHIP_MAX
 	)
 	game_state.campaign_runtime.log_diplomacy(
-		game_state.turn_number, giver_id, receiver_id, &"tech_gift", {"tech_tier": receiver.tech_tier}, true
+		game_state.turn_number, giver_id, receiver_id, &"tech_gift", {"tech_id": giver_node.tech_id, "tier": giver_node.tier}, true
 	)
 	return errors
 

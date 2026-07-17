@@ -25,7 +25,8 @@ func _ready() -> void:
 
 	var card_width := 560.0
 	var standings := _build_standings()
-	var card_height := 220.0 + standings.size() * 44.0
+	var unlocked_ids: Array[StringName] = GameState.last_unlocked_achievement_ids
+	var card_height := 220.0 + standings.size() * 44.0 + (0.0 if unlocked_ids.is_empty() else 48.0 + unlocked_ids.size() * 28.0)
 
 	var card := UITheme.make_card(Vector2(card_width, card_height))
 	center.add_child(card)
@@ -59,6 +60,20 @@ func _ready() -> void:
 	else:
 		for i in range(standings.size()):
 			vbox.add_child(_build_row(standings[i], i + 1))
+
+	if not unlocked_ids.is_empty():
+		vbox.add_child(HSeparator.new())
+		var achievements_title := Label.new()
+		achievements_title.text = "実績解除"
+		achievements_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vbox.add_child(achievements_title)
+		for id: StringName in unlocked_ids:
+			var def: AchievementDef = GameState.master_data.achievements.get(id)
+			var achievement_label := Label.new()
+			achievement_label.text = "・" + (tr(String(def.display_name_key)) if def != null else String(id))
+			achievement_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			achievement_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+			vbox.add_child(achievement_label)
 
 	vbox.add_child(HSeparator.new())
 

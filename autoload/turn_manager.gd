@@ -10,7 +10,7 @@ signal phase_changed(phase: Phase)
 ## directly (world keeps moving even off-screen). Empty string means
 ## nothing notable happened this turn.
 signal turn_events_ready(summary: String)
-signal research_completed(faction_id: StringName, new_tier: int)
+signal research_completed(faction_id: StringName, tech_id: StringName)
 
 var current_phase: Phase = Phase.INCOME
 var last_combat_log: Array = []  # this turn's auto-captures/battles, for logging/UI
@@ -27,35 +27,95 @@ var pending_squad_battles: Array[Dictionary] = []
 var pending_battle_states: Array[BattleRuntimeState] = []
 var next_battle_serial: int = 1
 
-## Global "development" command (per the original series' overall-menu
-## research command, not a per-region build item). Returns false if the
-## faction can't research right now (already researching, maxed out, or
-## can't afford it) without changing any state.
-func start_research(faction_id: StringName) -> bool:
+## STRATEGY_DETAIL_SPECIFICATION.md section 7: starts research on one node
+## of this faction's generated tech tree. A gifted node (Diplomacy.gift_tech)
+## uses a different availability rule than a normally-generated node's fixed
+## prerequisite_node_ids -- see _node_prerequisites_met.
+func start_research(faction_id: StringName, node_id: StringName) -> PackedStringArray:
+	var errors := PackedStringArray()
 	var faction: Faction = GameState.get_faction(faction_id)
-	if faction == null or faction.research_in_progress:
-		return false
+	if faction == null:
+		errors.append("research: faction_id does not resolve")
+		return errors
+	if faction.current_research != null:
+		errors.append("research: this faction already has research in progress")
+		return errors
+	var node := faction.generated_tech_nodes.get(node_id) as GeneratedTechNodeState
+	if node == null:
+		errors.append("research: node_id does not resolve to this faction's tech tree")
+		return errors
+	if node.researched:
+		errors.append("research: node is already researched")
+		return errors
+	if not _node_prerequisites_met(faction, node):
+		errors.append("research: node's prerequisites are not fully researched")
+		return errors
 	var config: CampaignConfig = GameState.campaign_config
-	if faction.tech_tier >= config.research_costs.size():
+	var tier_index := node.tier - 1
+	if tier_index < 0 or tier_index >= config.research_costs.size():
+		errors.append("research: node tier is outside the configured cost table")
+		return errors
+	var cost := ceili(float(config.research_costs[tier_index]) * (1.0 - _research_discount_pct(faction_id)))
+	if faction.funds < cost:
+		errors.append("research: insufficient funds")
+		return errors
+
+	faction.funds -= cost
+	var research := ResearchState.new()
+	research.node_id = node_id
+	research.funds_paid = cost
+	research.turns_remaining = config.research_turns[tier_index]
+	research.started_turn = GameState.turn_number
+	faction.current_research = research
+	return errors
+
+## A gifted node ignores its (empty) prerequisite_node_ids in favor of
+## STRATEGY_DETAIL_SPECIFICATION.md section 11.6's own rule: "Tier 1は即時
+## 研究可能、Tier 2以上は直前Tierを1件以上研究済みで研究可能とする
+## (個別の元前提技術は要求しない)" -- any researched node one tier down
+## satisfies it, not a specific fixed chain.
+func _node_prerequisites_met(faction: Faction, node: GeneratedTechNodeState) -> bool:
+	if node.gifted:
+		if node.tier <= 1:
+			return true
+		for other_id: StringName in faction.generated_tech_nodes:
+			var other := faction.generated_tech_nodes[other_id] as GeneratedTechNodeState
+			if other.tier == node.tier - 1 and other.researched:
+				return true
 		return false
-	var cost: int = config.research_costs[faction.tech_tier]
-	if faction.resources < cost:
-		return false
-	faction.resources -= cost
-	faction.research_in_progress = true
-	faction.research_turns_remaining = config.research_turns[faction.tech_tier]
+	for prereq_id: StringName in node.prerequisite_node_ids:
+		var prereq := faction.generated_tech_nodes.get(prereq_id) as GeneratedTechNodeState
+		if prereq == null or not prereq.researched:
+			return false
 	return true
 
+## STRATEGY_DETAIL_SPECIFICATION.md section 8.3: 5% off per owned research
+## facility in this faction's own territory, capped at 25%.
+func _research_discount_pct(faction_id: StringName) -> float:
+	var facility_count := 0
+	for region: Region in GameState.regions.values():
+		if region.owner_faction_id != faction_id:
+			continue
+		for facility_id: StringName in region.def.facility_instance_ids:
+			var instance := GameState.master_data.facility_instances.get(facility_id) as FacilityInstanceDef
+			if instance == null:
+				continue
+			var facility_def := GameState.master_data.facility_defs.get(instance.facility_def_id) as FacilityDef
+			if facility_def != null and facility_def.facility_type == GameEnums.FacilityType.RESEARCH:
+				facility_count += 1
+	return minf(float(facility_count) * 0.05, 0.25)
+
 func _advance_research(faction_id: StringName) -> void:
-	var config: CampaignConfig = GameState.campaign_config
 	var faction: Faction = GameState.get_faction(faction_id)
-	if faction == null or not faction.research_in_progress:
+	if faction == null or faction.current_research == null:
 		return
-	faction.research_turns_remaining -= 1
-	if faction.research_turns_remaining <= 0:
-		faction.tech_tier += 1
-		faction.research_in_progress = false
-		research_completed.emit(faction_id, faction.tech_tier)
+	faction.current_research.turns_remaining -= 1
+	if faction.current_research.turns_remaining <= 0:
+		var node := faction.generated_tech_nodes.get(faction.current_research.node_id) as GeneratedTechNodeState
+		faction.current_research = null
+		if node != null:
+			node.researched = true
+			research_completed.emit(faction_id, node.tech_id)
 
 func start_new_game(player_faction_id: StringName, difficulty_id: StringName = &"normal") -> void:
 	is_resolving_turn = false
@@ -119,18 +179,22 @@ func apply_save_dict(data: Dictionary) -> PackedStringArray:
 
 const SAVE_DIRECTORY := "user://saves/"
 const SAVE_VERSION := 1
+## SYSTEM_DETAIL_SPECIFICATION.md section 2.2: 3 rotating autosave slots,
+## displayed and stored separately from the 10 manual slots.
+const AUTOSAVE_SLOT_COUNT := 3
 
-func _save_path(slot: int) -> String:
-	return SAVE_DIRECTORY + "slot_%02d.json" % slot
+func _save_path(slot: int, auto: bool = false) -> String:
+	return SAVE_DIRECTORY + ("autosave_%02d.json" % slot if auto else "slot_%02d.json" % slot)
 
 ## DATA_DEFINITION.md section 26.2: manual saves are only ever possible
 ## during the player's own Phase.ORDERS, not mid-resolution or on an AI turn.
+## Autosaves aren't gated by this -- see _autosave's own doc comment.
 func can_save_now() -> bool:
 	return not GameState.is_game_over and active_faction_id == GameState.player_faction_id and current_phase == Phase.ORDERS and not is_resolving_turn
 
-func save_game(slot: int) -> PackedStringArray:
+func save_game(slot: int, auto: bool = false) -> PackedStringArray:
 	var errors := PackedStringArray()
-	if not can_save_now():
+	if not auto and not can_save_now():
 		errors.append("save: manual saves are only available during the player's own strategy phase")
 		return errors
 	var data := {
@@ -143,7 +207,7 @@ func save_game(slot: int) -> PackedStringArray:
 	if dir_error != OK and dir_error != ERR_ALREADY_EXISTS:
 		errors.append("save: could not create the save directory (error %d)" % dir_error)
 		return errors
-	var file := FileAccess.open(_save_path(slot), FileAccess.WRITE)
+	var file := FileAccess.open(_save_path(slot, auto), FileAccess.WRITE)
 	if file == null:
 		errors.append("save: could not open the save file for writing (error %d)" % FileAccess.get_open_error())
 		return errors
@@ -151,12 +215,40 @@ func save_game(slot: int) -> PackedStringArray:
 	file.close()
 	return errors
 
+## SYSTEM_DETAIL_SPECIFICATION.md section 2.1: "戦闘フェイズ開始前と各勢力
+## ターン開始時にオートセーブする" -- called from _begin_faction_turn and
+## right before Phase.COMBAT in _finish_active_faction_turn, for every
+## faction's turn, not just the player's, so it deliberately doesn't go
+## through can_save_now()'s player/ORDERS-phase gate (that gate exists to
+## stop the *player* from save-scumming mid-resolution, not because other
+## moments are unsafe to serialize -- both autosave triggers land on stable,
+## no-battle-in-progress states). Overwrites whichever of the 3 rotating
+## slots has the oldest saved_at_unix, or the first slot that doesn't exist
+## yet. Best-effort: failures are logged, not surfaced to the player.
+func _autosave() -> void:
+	if GameState.is_game_over:
+		return
+	var oldest_slot := 0
+	var oldest_time := INF
+	for slot in range(AUTOSAVE_SLOT_COUNT):
+		if not FileAccess.file_exists(_save_path(slot, true)):
+			oldest_slot = slot
+			oldest_time = -1.0
+			break
+		var saved_at := float(_read_save_summary(slot, true).get("saved_at_unix", 0))
+		if saved_at < oldest_time:
+			oldest_time = saved_at
+			oldest_slot = slot
+	var errors := save_game(oldest_slot, true)
+	if not errors.is_empty():
+		push_error("autosave failed: %s" % errors)
+
 ## Applies GameState's half first, then this autoload's own, since
 ## TurnManager.apply_save_dict validates faction_turn_order entries against
 ## GameState.factions and needs that already rebuilt.
-func load_game(slot: int) -> PackedStringArray:
+func load_game(slot: int, auto: bool = false) -> PackedStringArray:
 	var errors := PackedStringArray()
-	var path := _save_path(slot)
+	var path := _save_path(slot, auto)
 	if not FileAccess.file_exists(path):
 		errors.append("load: save slot %d does not exist" % slot)
 		return errors
@@ -191,17 +283,18 @@ func load_game(slot: int) -> PackedStringArray:
 	phase_changed.emit(current_phase)
 	return errors
 
-func list_save_slots() -> Array[Dictionary]:
+func list_save_slots(auto: bool = false) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	var dir := DirAccess.open(SAVE_DIRECTORY)
 	if dir == null:
 		return result
+	var prefix := "autosave_" if auto else "slot_"
 	dir.list_dir_begin()
 	var file_name := dir.get_next()
 	while file_name != "":
-		if not dir.current_is_dir() and file_name.begins_with("slot_") and file_name.ends_with(".json"):
-			var slot := int(file_name.trim_prefix("slot_").trim_suffix(".json"))
-			var info := _read_save_summary(slot)
+		if not dir.current_is_dir() and file_name.begins_with(prefix) and file_name.ends_with(".json"):
+			var slot := int(file_name.trim_prefix(prefix).trim_suffix(".json"))
+			var info := _read_save_summary(slot, auto)
 			if not info.is_empty():
 				result.append(info)
 		file_name = dir.get_next()
@@ -209,8 +302,8 @@ func list_save_slots() -> Array[Dictionary]:
 	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.slot) < int(b.slot))
 	return result
 
-func _read_save_summary(slot: int) -> Dictionary:
-	var file := FileAccess.open(_save_path(slot), FileAccess.READ)
+func _read_save_summary(slot: int, auto: bool = false) -> Dictionary:
+	var file := FileAccess.open(_save_path(slot, auto), FileAccess.READ)
 	if file == null:
 		return {}
 	var parsed: Variant = JSON.parse_string(file.get_as_text())
@@ -231,6 +324,7 @@ func _read_save_summary(slot: int) -> Dictionary:
 
 func _begin_faction_turn() -> void:
 	active_faction_id = faction_turn_order[active_faction_index]
+	_autosave()
 	active_faction_changed.emit(active_faction_id, active_faction_index)
 	GameState.campaign_runtime.reset_movement_for_faction(active_faction_id)
 	_set_phase(Phase.INCOME)
@@ -268,6 +362,7 @@ func _finish_active_faction_turn() -> void:
 	_set_phase(Phase.MOVEMENT)
 	_run_movement_phase(active_faction_id)
 	GameState.refresh_intel_from_colocation(active_faction_id)
+	_autosave()
 	_set_phase(Phase.COMBAT)
 	await _run_combat_phase()
 	turn_events_ready.emit(_build_world_events_summary())
@@ -486,4 +581,6 @@ func _end_game(reason: String, standings: Array) -> void:
 	GameState.is_game_over = true
 	GameState.last_game_over_reason = reason
 	GameState.last_game_over_standings = standings
+	if GameState.did_player_win():
+		GameState.evaluate_achievements()
 	GameState.game_over.emit(reason, standings)

@@ -30,9 +30,17 @@ var difficulty_id: StringName = &"normal"
 var is_game_over: bool = false
 var last_game_over_reason: String = ""
 var last_game_over_standings: Array = []
+## SYSTEM_DETAIL_SPECIFICATION.md section 2.3 / DATA_DEFINITION.md section
+## 24: achievements/permanent EXP bonus persist across campaigns in their
+## own file, independent of any CampaignSaveData slot.
+var profile := ProfileState.new()
+var last_unlocked_achievement_ids: Array[StringName] = []
+
+const PROFILE_PATH := "user://profile.json"
 
 func _ready() -> void:
 	_load_static_data()
+	_load_profile()
 
 func _load_static_data() -> void:
 	master_data.load_all()
@@ -67,6 +75,7 @@ func _load_resources_in_dir(path: String) -> Dictionary:
 func start_new_game(chosen_player_faction_id: StringName, chosen_difficulty_id: StringName = &"normal") -> void:
 	turn_number = 1
 	is_game_over = false
+	last_unlocked_achievement_ids = []
 	player_faction_id = chosen_player_faction_id
 	difficulty_id = chosen_difficulty_id if master_data.difficulties.has(chosen_difficulty_id) else &"normal"
 	campaign_runtime.reset()
@@ -84,6 +93,8 @@ func start_new_game(chosen_player_faction_id: StringName, chosen_difficulty_id: 
 	_seed_initial_pilots()
 	campaign_runtime.ensure_relation_states(factions.keys())
 	campaign_rng.randomize()
+	for id: StringName in factions:
+		(factions[id] as Faction).generated_tech_nodes = TechTreeGenerator.generate_for_faction(id, master_data, campaign_rng)
 	recompute_all_supply_networks()
 
 	turn_advanced.emit(turn_number)
@@ -100,6 +111,80 @@ func current_difficulty() -> DifficultyDef:
 	var difficulty := master_data.difficulties.get(difficulty_id) as DifficultyDef
 	return difficulty if difficulty != null else DifficultyDef.new()
 
+func _load_profile() -> void:
+	if not FileAccess.file_exists(PROFILE_PATH):
+		profile = ProfileState.new()
+		return
+	var file := FileAccess.open(PROFILE_PATH, FileAccess.READ)
+	if file == null:
+		profile = ProfileState.new()
+		return
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	profile = ProfileState.from_dict(parsed as Dictionary, master_data) if parsed is Dictionary else ProfileState.new()
+
+func save_profile() -> void:
+	var file := FileAccess.open(PROFILE_PATH, FileAccess.WRITE)
+	if file == null:
+		push_error("GameState: could not open the profile file for writing (error %d)" % FileAccess.get_open_error())
+		return
+	file.store_string(JSON.stringify(profile.to_dict()))
+	file.close()
+
+## TurnManager._end_game's reason/standings encode the winner uniformly:
+## "player_eliminated" is always a loss, capital_capture/region_threshold
+## carry a single-entry standings array for the winner, and turn_cap carries
+## a full board sorted by score descending -- so standings[0] is always the
+## winner (or the sole survivor) whenever the game didn't end in the
+## player's own elimination.
+func did_player_win() -> bool:
+	if not is_game_over or last_game_over_reason == "player_eliminated" or last_game_over_standings.is_empty():
+		return false
+	return StringName((last_game_over_standings[0] as Dictionary).get("faction_id", "")) == player_faction_id
+
+## Called once the game ends in the player's own victory. Unlocks whatever
+## AchievementDefs the player newly qualifies for, persists the profile if
+## anything changed, and returns the newly-unlocked ids for the results
+## screen to display.
+func evaluate_achievements() -> Array[StringName]:
+	var newly_unlocked: Array[StringName] = []
+	var ids := master_data.achievements.keys()
+	ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for id: StringName in ids:
+		if profile.has_achievement(id):
+			continue
+		var def := master_data.achievements[id] as AchievementDef
+		if def != null and _achievement_condition_met(def) and profile.unlock_achievement(id, master_data):
+			newly_unlocked.append(id)
+	if not newly_unlocked.is_empty():
+		save_profile()
+	last_unlocked_achievement_ids = newly_unlocked
+	return newly_unlocked
+
+func _achievement_condition_met(def: AchievementDef) -> bool:
+	match def.condition_type:
+		&"faction_clear":
+			return player_faction_id == StringName(def.condition_payload.get("faction_id", ""))
+		&"difficulty_clear":
+			return difficulty_id == StringName(def.condition_payload.get("difficulty_id", ""))
+		&"turn_limit_clear":
+			return turn_number <= int(def.condition_payload.get("max_turn", 0))
+		&"capture_count":
+			var faction := get_faction(player_faction_id)
+			return faction != null and faction.total_units_captured >= int(def.condition_payload.get("count", 0))
+		&"treaty_count":
+			return _count_successful_player_treaties() >= int(def.condition_payload.get("count", 0))
+	return false
+
+func _count_successful_player_treaties() -> int:
+	var count := 0
+	for entry: Dictionary in campaign_runtime.diplomacy_log:
+		if StringName(entry.get("action_type", "")) != &"treaty_proposal" or not bool(entry.get("success", false)):
+			continue
+		if StringName(entry.get("actor_faction_id", "")) == player_faction_id or StringName(entry.get("target_faction_id", "")) == player_faction_id:
+			count += 1
+	return count
+
 ## DATA_DEFINITION.md section 26: everything a manual save needs from
 ## GameState's side (TurnManager.to_save_dict covers the turn-order/phase
 ## half). difficulty_id and rng_state are intentionally omitted -- there is
@@ -111,15 +196,20 @@ func to_save_dict() -> Dictionary:
 	faction_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
 	for faction_id: StringName in faction_ids:
 		var faction := factions[faction_id] as Faction
+		var node_states: Array[Dictionary] = []
+		var node_ids := faction.generated_tech_nodes.keys()
+		node_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+		for node_id: StringName in node_ids:
+			node_states.append((faction.generated_tech_nodes[node_id] as GeneratedTechNodeState).to_dict())
 		faction_states.append({
 			"faction_id": faction_id,
 			"resources": faction.resources,
 			"funds": faction.funds,
 			"materials": faction.materials,
 			"eliminated": faction.eliminated,
-			"tech_tier": faction.tech_tier,
-			"research_in_progress": faction.research_in_progress,
-			"research_turns_remaining": faction.research_turns_remaining,
+			"generated_tech_nodes": node_states,
+			"current_research": faction.current_research.to_dict() if faction.current_research != null else {},
+			"total_units_captured": faction.total_units_captured,
 		})
 	var region_states: Array[Dictionary] = []
 	var region_ids := regions.keys()
@@ -177,9 +267,23 @@ func apply_save_dict(data: Dictionary) -> PackedStringArray:
 			faction.funds = int(entry.get("funds", 0))
 			faction.materials = int(entry.get("materials", 0))
 			faction.eliminated = bool(entry.get("eliminated", false))
-			faction.tech_tier = int(entry.get("tech_tier", 0))
-			faction.research_in_progress = bool(entry.get("research_in_progress", false))
-			faction.research_turns_remaining = int(entry.get("research_turns_remaining", 0))
+			faction.generated_tech_nodes.clear()
+			var node_values: Variant = entry.get("generated_tech_nodes", [])
+			if node_values is Array:
+				for node_value: Variant in node_values as Array:
+					if not node_value is Dictionary:
+						errors.append("save.faction_states: generated_tech_nodes entry must be a Dictionary")
+						continue
+					var node := GeneratedTechNodeState.from_dict(node_value as Dictionary)
+					if node.node_id.is_empty() or faction.generated_tech_nodes.has(node.node_id):
+						errors.append("save.faction_states: empty or duplicate tech node_id '%s'" % node.node_id)
+					else:
+						faction.generated_tech_nodes[node.node_id] = node
+			else:
+				errors.append("save.faction_states: generated_tech_nodes must be an Array")
+			var research_value: Variant = entry.get("current_research", {})
+			faction.current_research = ResearchState.from_dict(research_value as Dictionary) if research_value is Dictionary and not (research_value as Dictionary).is_empty() else null
+			faction.total_units_captured = int(entry.get("total_units_captured", 0))
 	else:
 		errors.append("save.faction_states must be an Array")
 
@@ -399,6 +503,9 @@ func _apply_battle_unit_outcomes(battle: BattleRuntimeState) -> void:
 					if capture_result.errors.is_empty():
 						battle.result.captured_unit_ids.append(unit_id)
 						captured = true
+						var winner_faction := get_faction(winner_id)
+						if winner_faction != null:
+							winner_faction.total_units_captured += 1
 					else:
 						push_error("battle result: capture failed for '%s': %s" % [unit_id, capture_result.errors])
 			if not captured:
@@ -409,10 +516,10 @@ func _apply_battle_unit_outcomes(battle: BattleRuntimeState) -> void:
 
 ## STRATEGY_DETAIL_SPECIFICATION.md section 5.3: base EXP is summed on
 ## BattleUnitState.exp_earned throughout the battle; the permanent profile
-## EXP bonus (achievements) is applied last with ceil(). No achievement/
-## profile system exists yet, so that bonus is a documented 0.0 placeholder.
+## EXP bonus (achievements) is applied last with ceil(). Only the player's
+## own pilots draw on `profile` -- it's the player's own cross-campaign
+## meta-progression, not a bonus for the AI's pilots too.
 func _apply_battle_pilot_exp(battle: BattleRuntimeState) -> void:
-	const PERMANENT_EXP_BONUS_PCT := 0.0
 	for unit_id: StringName in battle.unit_states_by_id:
 		var battle_unit := battle.unit_states_by_id[unit_id] as BattleUnitState
 		if battle_unit.pilot_id.is_empty() or battle_unit.exp_earned <= 0:
@@ -420,7 +527,8 @@ func _apply_battle_pilot_exp(battle: BattleRuntimeState) -> void:
 		var pilot := campaign_runtime.get_pilot(battle_unit.pilot_id)
 		if pilot == null:
 			continue
-		var final_exp := ceili(float(battle_unit.exp_earned) * (1.0 + PERMANENT_EXP_BONUS_PCT))
+		var permanent_bonus_pct := profile.permanent_exp_bonus_pct if pilot.owner_faction_id == player_faction_id else 0.0
+		var final_exp := ceili(float(battle_unit.exp_earned) * (1.0 + permanent_bonus_pct))
 		pilot.current_exp += final_exp
 		battle.result.pilot_exp[battle_unit.pilot_id] = int(battle.result.pilot_exp.get(battle_unit.pilot_id, 0)) + final_exp
 		while pilot.level < GameConstants.PILOT_LEVEL_CAP:

@@ -9,13 +9,19 @@ var materials: int
 var is_ai_controlled: bool
 var eliminated: bool = false
 
-## Global "development level" — a faction-wide command (not per-region),
-## matching the original series' overall-menu research command. Legacy
-## placeholder from the prototype tech system; superseded by the generated
-## tech-node tree in DATA_DEFINITION.md once that migration lands.
-var tech_tier: int = 0
-var research_in_progress: bool = false
-var research_turns_remaining: int = 0
+## STRATEGY_DETAIL_SPECIFICATION.md section 7.2 / DATA_DEFINITION.md section
+## 15.1: this faction's campaign-generated tech tree (TechTreeGenerator),
+## keyed by node_id. Fixed once at campaign start; gift_tech can add extra
+## gifted nodes to it afterward.
+var generated_tech_nodes: Dictionary = {}
+## Null when nothing is being researched. At most one at a time
+## (DATA_DEFINITION.md section 15.2).
+var current_research: ResearchState = null
+
+## DATA_DEFINITION.md section 23's capture_ten_units-style achievement
+## condition needs a running total across the whole campaign, not just a
+## single battle's BattleResultState.captured_unit_ids.
+var total_units_captured: int = 0
 
 func _init(faction_def: FactionDef) -> void:
 	def = faction_def

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/achievement_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"capture_ten_units"
+display_name_key = &"achievement.capture_ten_units.name"
+description_key = &"achievement.capture_ten_units.description"
+condition_type = &"capture_count"
+condition_payload = {
+"count": 10
+}
+exp_bonus_pct = 0.05

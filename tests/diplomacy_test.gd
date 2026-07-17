@@ -23,7 +23,8 @@ func _initialize() -> void:
 	_test_active_treaty_blocks_invasion_movement()
 	_test_break_treaty_penalizes_the_breaker_only()
 	_test_gift_resources_requires_minimum_and_applies_cooldown()
-	_test_gift_tech_advances_receivers_tier_once()
+	_test_gift_tech_registers_a_new_gifted_node()
+	_test_gifted_node_uses_the_any_prior_tier_prerequisite_rule()
 	_test_purchase_intel_transfers_only_confirmed_squads()
 	_test_ransom_captured_unit_returns_it_to_the_original_faction()
 	_finish()
@@ -216,29 +217,50 @@ func _test_gift_resources_requires_minimum_and_applies_cooldown() -> void:
 	_check(not cooldown_errors.is_empty(), "gifting again immediately should be blocked by the shared 5-turn cooldown")
 
 
-## gift_tech is a simplified stand-in for section 11.6 (see Diplomacy's
-## class doc comment): it advances the receiver's flat tech_tier by exactly
-## one instead of registering a real research candidate, gated on the giver
-## already being at least one tier ahead so a gift can never hand over tech
-## nobody in the campaign has researched.
-func _test_gift_tech_advances_receivers_tier_once() -> void:
+## Replaces both factions' generated trees with small, fully-controlled
+## fixtures instead of relying on TechTreeGenerator's random draw, so this
+## test is deterministic regardless of campaign_rng's seed.
+func _test_gift_tech_registers_a_new_gifted_node() -> void:
 	turn_manager.start_new_game(&"nova_republic")
 	var nova: Faction = game_state.get_faction(&"nova_republic")
 	var crimson: Faction = game_state.get_faction(&"crimson_empire")
-	var max_tier: int = game_state.campaign_config.research_costs.size()
 
-	var not_ahead_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
-	_check(not not_ahead_errors.is_empty(), "a giver at the same tier as the receiver should be rejected")
+	var giver_node := GeneratedTechNodeState.new()
+	giver_node.node_id = &"test_giver_node"
+	giver_node.tech_id = &"improved_targeting_array"  # tier 1, giftable=true in the real data
+	giver_node.tier = 1
+	giver_node.researched = true
+	var unresearched_node := GeneratedTechNodeState.new()
+	unresearched_node.node_id = &"test_unresearched_node"
+	unresearched_node.tech_id = &"reinforced_plating"
+	unresearched_node.tier = 2
+	var non_giftable_node := GeneratedTechNodeState.new()
+	non_giftable_node.node_id = &"test_non_giftable_node"
+	non_giftable_node.tech_id = &"nova_hull_foundation"  # giftable=false in the real data
+	non_giftable_node.tier = 1
+	non_giftable_node.researched = true
+	nova.generated_tech_nodes = {
+		giver_node.node_id: giver_node,
+		unresearched_node.node_id: unresearched_node,
+		non_giftable_node.node_id: non_giftable_node,
+	}
+	crimson.generated_tech_nodes = {}
 
-	nova.tech_tier = 1
+	var unresearched_gift_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire", &"test_unresearched_node")
+	_check(not unresearched_gift_errors.is_empty(), "gifting a node the giver hasn't researched should be rejected")
+	var non_giftable_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire", &"test_non_giftable_node")
+	_check(not non_giftable_errors.is_empty(), "a tech marked giftable=false must not be gift-able")
+
 	var relation: RelationState = game_state.campaign_runtime.get_relation_state(&"nova_republic", &"crimson_empire")
 	var friendship_before: int = relation.friendship
-	_check(crimson.tech_tier == 0, "setup: receiver should start at tier 0")
-
-	var errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
+	var errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire", &"test_giver_node")
 	_check(errors.is_empty(), "a well-formed tech gift should succeed: %s" % [errors])
-	_check(crimson.tech_tier == 1, "tech gift should advance the receiver's tier by exactly one, got %d" % crimson.tech_tier)
-	_check(nova.tech_tier == 1, "the giver's own tier must be unaffected by gifting")
+	_check(crimson.generated_tech_nodes.size() == 1, "the receiver should gain exactly one new node, got %d" % crimson.generated_tech_nodes.size())
+	if crimson.generated_tech_nodes.size() == 1:
+		var gifted_node: GeneratedTechNodeState = crimson.generated_tech_nodes.values()[0]
+		_check(gifted_node.tech_id == &"improved_targeting_array" and gifted_node.gifted and not gifted_node.researched,
+			"the gifted node should carry the giver's tech_id, be marked gifted, and start unresearched")
+	_check(giver_node.researched, "the giver must keep their own researched node untouched")
 	_check(relation.friendship == friendship_before + GameConstants.GIFT_FRIENDSHIP_GAIN,
 		"tech gift should apply the same fixed +5 friendship gain as a resource gift")
 	_check(relation.gift_cooldown_turns == GameConstants.DIPLOMACY_GIFT_COOLDOWN_TURNS,
@@ -248,18 +270,34 @@ func _test_gift_tech_advances_receivers_tier_once() -> void:
 	_check(not blocked_resource_gift.is_empty(), "a resource gift should be blocked by the cooldown a tech gift just set, since they share one pool")
 
 	relation.gift_cooldown_turns = 0
-	var same_tier_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
-	_check(not same_tier_errors.is_empty(), "once the receiver catches up to the giver's tier, a second gift should fail")
+	var duplicate_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire", &"test_giver_node")
+	_check(not duplicate_errors.is_empty(), "gifting the same tech_id to a receiver who already has it should be rejected")
 
-	nova.tech_tier = 2
-	crimson.research_in_progress = true
-	var mid_research_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
-	_check(not mid_research_errors.is_empty(), "a receiver with research already in progress must not receive a tech gift")
-	crimson.research_in_progress = false
 
-	crimson.tech_tier = max_tier
-	var maxed_receiver_errors := Diplomacy.gift_tech(game_state, &"nova_republic", &"crimson_empire")
-	_check(not maxed_receiver_errors.is_empty(), "a receiver already at the maximum tier must not receive a tech gift")
+func _test_gifted_node_uses_the_any_prior_tier_prerequisite_rule() -> void:
+	turn_manager.start_new_game(&"nova_republic")
+	var crimson: Faction = game_state.get_faction(&"crimson_empire")
+
+	var gifted_tier1 := GeneratedTechNodeState.new()
+	gifted_tier1.node_id = &"gift_tier1"
+	gifted_tier1.tech_id = &"improved_targeting_array"
+	gifted_tier1.tier = 1
+	gifted_tier1.gifted = true
+	crimson.generated_tech_nodes = {gifted_tier1.node_id: gifted_tier1}
+	_check(turn_manager._node_prerequisites_met(crimson, gifted_tier1), "a gifted Tier 1 node should always be immediately researchable")
+
+	var gifted_tier2 := GeneratedTechNodeState.new()
+	gifted_tier2.node_id = &"gift_tier2"
+	gifted_tier2.tech_id = &"reinforced_plating"
+	gifted_tier2.tier = 2
+	gifted_tier2.gifted = true
+	crimson.generated_tech_nodes[gifted_tier2.node_id] = gifted_tier2
+	_check(not turn_manager._node_prerequisites_met(crimson, gifted_tier2),
+		"a gifted Tier 2 node should need any researched Tier 1 node first, not be free of prerequisites")
+
+	gifted_tier1.researched = true
+	_check(turn_manager._node_prerequisites_met(crimson, gifted_tier2),
+		"once any Tier 1 node is researched (not a specific one), the gifted Tier 2 node should become available")
 
 
 ## No FactionDef exists for a third distinct faction in the current dataset,

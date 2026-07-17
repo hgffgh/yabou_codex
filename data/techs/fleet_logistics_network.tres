@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tech_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"fleet_logistics_network"
+display_name_key = &"tech.fleet_logistics_network.name"
+description_key = &"tech.fleet_logistics_network.description"
+origin_faction_id = &"nova_republic"
+tier = 4
+category = &"facility"

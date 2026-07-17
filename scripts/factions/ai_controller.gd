@@ -18,20 +18,38 @@ static func decide_orders(faction_id: StringName) -> void:
 	_decide_squad_movements(faction_id, faction)
 
 const MAX_QUEUE_LENGTH := 3  # keep the AI's production responsive to the battlefield rather than committing resources many turns ahead
-const RESEARCH_RESERVE := 40  # only research if this much would still be left over for production
+const RESEARCH_RESERVE := 300  # only research if this much would still be left over for production
 
-## Opportunistic: research whenever affordable with a comfortable buffer
-## left over, rather than always saving for it or never bothering — a
-## faction that's flush with income naturally starts climbing tiers.
+## Opportunistic: research the cheapest currently-available node (lowest
+## tier, ties broken by id) whenever affordable with a comfortable buffer
+## left over, rather than always saving for it or never bothering -- a
+## faction that's flush with income naturally starts climbing the tree.
 static func _decide_research(faction_id: StringName, faction: Faction) -> void:
-	if faction.research_in_progress:
+	if faction.current_research != null:
 		return
+	var node_id := _cheapest_available_node(faction)
+	if node_id.is_empty():
+		return
+	var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
 	var config: CampaignConfig = GameState.campaign_config
-	if faction.tech_tier >= config.research_costs.size():
-		return
-	var cost: int = config.research_costs[faction.tech_tier]
-	if faction.resources >= cost + RESEARCH_RESERVE:
-		TurnManager.start_research(faction_id)
+	var cost: int = config.research_costs[node.tier - 1]
+	if faction.funds >= cost + RESEARCH_RESERVE:
+		TurnManager.start_research(faction_id, node_id)
+
+static func _cheapest_available_node(faction: Faction) -> StringName:
+	var candidates: Array[StringName] = []
+	for node_id: StringName in faction.generated_tech_nodes:
+		var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
+		if not node.researched and TurnManager._node_prerequisites_met(faction, node):
+			candidates.append(node_id)
+	if candidates.is_empty():
+		return &""
+	candidates.sort_custom(func(a: StringName, b: StringName) -> bool:
+		var na := faction.generated_tech_nodes[a] as GeneratedTechNodeState
+		var nb := faction.generated_tech_nodes[b] as GeneratedTechNodeState
+		if na.tier != nb.tier: return na.tier < nb.tier
+		return String(a) < String(b))
+	return candidates[0]
 
 static func _decide_production(faction: Faction, region: Region) -> void:
 	var facility_ids := GameState.production_facility_ids_for_region(region.def.id)

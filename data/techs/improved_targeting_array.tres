@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tech_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"improved_targeting_array"
+display_name_key = &"tech.improved_targeting_array.name"
+description_key = &"tech.improved_targeting_array.description"
+origin_faction_id = &"nova_republic"
+tier = 1
+category = &"support"

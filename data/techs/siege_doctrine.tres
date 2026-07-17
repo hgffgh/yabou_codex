@@ -1,0 +1,12 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tech_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"siege_doctrine"
+display_name_key = &"tech.siege_doctrine.name"
+description_key = &"tech.siege_doctrine.description"
+origin_faction_id = &"crimson_empire"
+tier = 4
+category = &"unit"

@@ -19,7 +19,7 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	for category: StringName in [
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
-		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties",
+		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties", &"achievements",
 	]:
 		_validate_ids(category, registry.get_category(category))
 	_validate_global_id_uniqueness(registry)
@@ -34,6 +34,8 @@ func validate(registry: MasterDataRegistry) -> PackedStringArray:
 	_validate_terrain_zones(registry)
 	_validate_battle_maps(registry)
 	_validate_difficulties(registry)
+	_validate_achievements(registry)
+	_validate_techs(registry)
 	_errors.sort()
 	return _errors.duplicate()
 
@@ -43,7 +45,7 @@ func _validate_global_id_uniqueness(registry: MasterDataRegistry) -> void:
 	for category: StringName in [
 		&"units", &"weapons", &"support_skills", &"pilots", &"pilot_skills",
 		&"factions", &"techs", &"facility_defs", &"facility_instances",
-		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties",
+		&"battle_maps", &"battle_control_points", &"terrain_zones", &"difficulties", &"achievements",
 	]:
 		for id_value: Variant in registry.get_category(category):
 			var id := StringName(id_value)
@@ -139,6 +141,16 @@ func _validate_units(registry: MasterDataRegistry) -> void:
 			if not DAMAGE_MULTIPLIERS.has(float(item.get(String(field)))):
 				_error(&"units", id, "%s has unsupported value" % field)
 		_min_float(item, &"power_adjustment", 0.000001, &"units", id)
+
+
+func _validate_techs(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.techs):
+		var item: Resource = registry.techs[id]
+		_require_key(item, &"display_name_key", &"techs", id)
+		_require_key(item, &"description_key", &"techs", id)
+		_reference(item, &"origin_faction_id", &"factions", registry.factions, &"techs", id)
+		_range_int(item, &"tier", 1, 5, &"techs", id)
+		_require_key(item, &"category", &"techs", id)
 
 
 func _validate_pilot_skills(registry: MasterDataRegistry) -> void:
@@ -259,6 +271,13 @@ func _validate_difficulties(registry: MasterDataRegistry) -> void:
 		_range_int(item, &"enemy_accuracy_add", -50, 50, &"difficulties", id)
 		_range_int(item, &"enemy_evasion_add", -50, 50, &"difficulties", id)
 		_require_key(item, &"ai_profile_id", &"difficulties", id)
+
+
+func _validate_achievements(registry: MasterDataRegistry) -> void:
+	for id: StringName in _sorted_ids(registry.achievements):
+		var item: Resource = registry.achievements[id]
+		_require_key(item, &"condition_type", &"achievements", id)
+		_range_float(item, &"exp_bonus_pct", 0.0, 0.5, &"achievements", id)
 
 
 func _reference(item: Resource, field: StringName, target_name: StringName, target: Dictionary, category: StringName, id: StringName) -> void:

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/achievement_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"clear_within_50_turns"
+display_name_key = &"achievement.clear_within_50_turns.name"
+description_key = &"achievement.clear_within_50_turns.description"
+condition_type = &"turn_limit_clear"
+condition_payload = {
+"max_turn": 50
+}
+exp_bonus_pct = 0.08

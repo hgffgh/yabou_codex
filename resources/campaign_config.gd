@@ -5,7 +5,8 @@ extends Resource
 @export var victory_region_threshold_pct: float = 0.6
 @export var faction_turn_order: Array[StringName] = []
 
-## Index i = cost/turns to research from tier i to tier i+1. Array length
-## determines the max tech tier (2 entries = tiers 0,1,2 reachable).
-@export var research_costs: Array[int] = [80, 150]
-@export var research_turns: Array[int] = [3, 4]
+## STRATEGY_DETAIL_SPECIFICATION.md section 7.3: index i (0-based) is Tier
+## i+1's base funds cost / turn duration, before TurnManager applies each
+## faction's research-facility discount.
+@export var research_costs: Array[int] = [1000, 2000, 3000, 5000, 8000]
+@export var research_turns: Array[int] = [1, 2, 3, 4, 5]

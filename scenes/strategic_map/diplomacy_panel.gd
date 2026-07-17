@@ -150,18 +150,31 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	gift_materials_button.pressed.connect(_on_gift_pressed.bind(other_id, 0, GameConstants.MIN_GIFT_MATERIALS))
 	actions_row.add_child(gift_materials_button)
 
+	section.add_child(actions_row)
+
+	var tech_row := HBoxContainer.new()
+	tech_row.add_theme_constant_override("separation", 6)
 	var other_faction := GameState.get_faction(other_id)
+	var tech_picker := OptionButton.new()
+	tech_picker.custom_minimum_size = Vector2(360, 36)
+	for gift_node_id: StringName in _giftable_tech_nodes(faction, other_faction):
+		var node := faction.generated_tech_nodes[gift_node_id] as GeneratedTechNodeState
+		var tech_def: TechDef = GameState.master_data.techs.get(node.tech_id)
+		tech_picker.add_item("Tier%d %s" % [node.tier, tr(String(tech_def.display_name_key)) if tech_def != null else String(node.tech_id)])
+		tech_picker.set_item_metadata(tech_picker.item_count - 1, gift_node_id)
+	if tech_picker.item_count == 0:
+		tech_picker.add_item("(贈与可能な技術がありません)")
+		tech_picker.disabled = true
+	tech_row.add_child(tech_picker)
+
 	var tech_gift_button := Button.new()
 	tech_gift_button.text = "技術贈与"
 	tech_gift_button.custom_minimum_size = Vector2(90, 36)
-	var max_tier: int = GameState.campaign_config.research_costs.size()
-	tech_gift_button.disabled = not can_act or relation.gift_cooldown_turns > 0 \
-		or other_faction == null or other_faction.research_in_progress \
-		or faction.tech_tier <= other_faction.tech_tier or other_faction.tech_tier >= max_tier
-	tech_gift_button.pressed.connect(_on_tech_gift_pressed.bind(other_id))
-	actions_row.add_child(tech_gift_button)
+	tech_gift_button.disabled = not can_act or relation.gift_cooldown_turns > 0 or tech_picker.disabled
+	tech_gift_button.pressed.connect(_on_tech_gift_pressed.bind(other_id, tech_picker))
+	tech_row.add_child(tech_gift_button)
 
-	section.add_child(actions_row)
+	section.add_child(tech_row)
 	section.add_child(HSeparator.new())
 	return section
 
@@ -213,8 +226,32 @@ func _on_gift_pressed(other_id: StringName, funds: int, materials: int) -> void:
 	else:
 		_status_label.text = "贈与しました。"
 
-func _on_tech_gift_pressed(other_id: StringName) -> void:
-	var errors := Diplomacy.gift_tech(GameState, _faction_id, other_id)
+## Every researched, giftable node this faction has whose tech_id the other
+## faction doesn't already hold anywhere in its own tree (STRATEGY_DETAIL_
+## SPECIFICATION.md section 11.6: "同じ技術を同じ勢力へ複数回贈与できない").
+func _giftable_tech_nodes(faction: Faction, other_faction: Faction) -> Array[StringName]:
+	var result: Array[StringName] = []
+	if faction == null or other_faction == null:
+		return result
+	var other_tech_ids := {}
+	for other_node_id: Variant in other_faction.generated_tech_nodes:
+		other_tech_ids[(other_faction.generated_tech_nodes[other_node_id] as GeneratedTechNodeState).tech_id] = true
+	var node_ids := faction.generated_tech_nodes.keys()
+	node_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
+	for node_id: StringName in node_ids:
+		var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
+		if not node.researched or other_tech_ids.has(node.tech_id):
+			continue
+		var tech_def: TechDef = GameState.master_data.techs.get(node.tech_id)
+		if tech_def != null and tech_def.giftable:
+			result.append(node_id)
+	return result
+
+func _on_tech_gift_pressed(other_id: StringName, picker: OptionButton) -> void:
+	if picker.item_count == 0 or picker.disabled or picker.selected < 0:
+		return
+	var giver_node_id := StringName(picker.get_item_metadata(picker.selected))
+	var errors := Diplomacy.gift_tech(GameState, _faction_id, other_id, giver_node_id)
 	_refresh()
 	if not errors.is_empty():
 		_status_label.text = "技術贈与に失敗しました: %s" % errors[0]

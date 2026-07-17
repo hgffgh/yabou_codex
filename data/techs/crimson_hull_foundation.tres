@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tech_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"crimson_hull_foundation"
+display_name_key = &"tech.crimson_hull_foundation.name"
+description_key = &"tech.crimson_hull_foundation.description"
+origin_faction_id = &"crimson_empire"
+tier = 1
+category = &"unit"
+mandatory_base_tech = true
+giftable = false

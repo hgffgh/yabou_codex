@@ -33,4 +33,4 @@ sensor_range_m = 150.0
 sensor_ignores_obstacles = false
 capture_allowed = true
 power_adjustment = 1.0
-tech_id = &"prototype_foundation"
+tech_id = &"nova_hull_foundation"

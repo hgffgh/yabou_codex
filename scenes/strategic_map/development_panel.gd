@@ -1,15 +1,15 @@
 class_name DevelopmentPanel
 extends CanvasLayer
-## The faction-wide "development" command (per the original series' overall
-## command menu, not a per-region build item) — advances the player's
-## tech_tier, unlocking higher-tier units everywhere. Own CanvasLayer, dim
-## background, centered card.
+## STRATEGY_DETAIL_SPECIFICATION.md section 7: shows this faction's whole
+## campaign-generated tech tree (TechTreeGenerator) and lets the player
+## start researching any node whose prerequisites are already met. Own
+## CanvasLayer, dim background, centered card, matching the other panels.
 
 signal closed
 
 var _faction_id: StringName
 var _status_label: Label
-var _research_button: Button
+var _rows: VBoxContainer
 
 func setup(faction_id: StringName) -> void:
 	_faction_id = faction_id
@@ -30,13 +30,13 @@ func setup(faction_id: StringName) -> void:
 	root.add_child(center)
 	UIUtils.fill_parent(center)
 
-	var card := UITheme.make_card(Vector2(420, 240))
+	var card := UITheme.make_card(Vector2(640, 560))
 	center.add_child(card)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
+	vbox.add_theme_constant_override("separation", 10)
 	vbox.position = Vector2(24, 20)
-	vbox.size = Vector2(372, 200)
+	vbox.size = Vector2(592, 520)
 	card.add_child(vbox)
 
 	var title := Label.new()
@@ -50,10 +50,13 @@ func setup(faction_id: StringName) -> void:
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(_status_label)
 
-	_research_button = Button.new()
-	_research_button.custom_minimum_size = Vector2(0, 44)
-	_research_button.pressed.connect(_on_research_pressed)
-	vbox.add_child(_research_button)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(592, 420)
+	vbox.add_child(scroll)
+	_rows = VBoxContainer.new()
+	_rows.add_theme_constant_override("separation", 4)
+	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_rows)
 
 	var close_button := Button.new()
 	close_button.text = "閉じる"
@@ -66,33 +69,82 @@ func setup(faction_id: StringName) -> void:
 	_refresh()
 
 func _refresh() -> void:
+	for child in _rows.get_children():
+		child.queue_free()
+
 	var faction: Faction = GameState.get_faction(_faction_id)
-	var config: CampaignConfig = GameState.campaign_config
-	var max_tier: int = config.research_costs.size()
+	var can_act := TurnManager.current_phase == TurnManager.Phase.ORDERS \
+		and TurnManager.active_faction_id == _faction_id and not TurnManager.is_resolving_turn
 
-	var text := "現在の開発レベル: Tier %d / %d\n" % [faction.tech_tier, max_tier]
-	var orders_open := TurnManager.current_phase == TurnManager.Phase.ORDERS
-	if faction.tech_tier >= max_tier:
-		text += "これ以上の開発はありません。"
-		_research_button.disabled = true
-		_research_button.text = "開発済み"
-	elif faction.research_in_progress:
-		text += "次のレベルまで残り%dターン" % faction.research_turns_remaining
-		_research_button.disabled = true
-		_research_button.text = "開発中…"
+	var researched_count := 0
+	for node_id: Variant in faction.generated_tech_nodes:
+		if (faction.generated_tech_nodes[node_id] as GeneratedTechNodeState).researched:
+			researched_count += 1
+	var total_count: int = faction.generated_tech_nodes.size()
+
+	var status_text := "研究済み %d / %d" % [researched_count, total_count]
+	if faction.current_research != null:
+		var researching_node := faction.generated_tech_nodes.get(faction.current_research.node_id) as GeneratedTechNodeState
+		var tech_def: TechDef = GameState.master_data.techs.get(researching_node.tech_id) if researching_node != null else null
+		var tech_name := tr(String(tech_def.display_name_key)) if tech_def != null else String(faction.current_research.node_id)
+		status_text += "\n研究中: %s (残り%dターン)" % [tech_name, faction.current_research.turns_remaining]
+	elif not can_act:
+		status_text += "\n研究開始は自勢力の命令フェイズ中のみ可能です。"
+	_status_label.text = status_text
+
+	var node_ids := faction.generated_tech_nodes.keys()
+	node_ids.sort_custom(func(a: Variant, b: Variant) -> bool:
+		var na := faction.generated_tech_nodes[a] as GeneratedTechNodeState
+		var nb := faction.generated_tech_nodes[b] as GeneratedTechNodeState
+		if na.tier != nb.tier: return na.tier < nb.tier
+		return String(a) < String(b))
+
+	for node_id: StringName in node_ids:
+		_rows.add_child(_build_node_row(faction, node_id, can_act))
+
+func _build_node_row(faction: Faction, node_id: StringName, can_act: bool) -> Control:
+	var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
+	var tech_def: TechDef = GameState.master_data.techs.get(node.tech_id)
+	var tech_name := tr(String(tech_def.display_name_key)) if tech_def != null else String(node.tech_id)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var label := Label.new()
+	label.custom_minimum_size = Vector2(420, 0)
+	var gifted_tag := "(贈与)" if node.gifted else ""
+	if node.researched:
+		label.text = "Tier%d %s %s ── 研究済み" % [node.tier, tech_name, gifted_tag]
+	elif TurnManager._node_prerequisites_met(faction, node):
+		var config: CampaignConfig = GameState.campaign_config
+		label.text = "Tier%d %s %s ── コスト%d・%dターン" % [
+			node.tier, tech_name, gifted_tag, config.research_costs[node.tier - 1], config.research_turns[node.tier - 1],
+		]
 	else:
-		var cost: int = config.research_costs[faction.tech_tier]
-		var turns: int = config.research_turns[faction.tech_tier]
-		text += "次のレベルへの開発: コスト%d・所要%dターン" % [cost, turns]
-		_research_button.disabled = not orders_open or faction.resources < cost
-		_research_button.text = "開発を開始"
-	_status_label.text = text
+		label.text = "Tier%d %s %s ── 前提未達成" % [node.tier, tech_name, gifted_tag]
+	row.add_child(label)
 
-func _on_research_pressed() -> void:
-	if TurnManager.start_research(_faction_id):
-		_refresh()
+	var button := Button.new()
+	button.text = "研究開始"
+	button.custom_minimum_size = Vector2(90, 36)
+	button.disabled = not can_act or node.researched or faction.current_research != null \
+		or not TurnManager._node_prerequisites_met(faction, node)
+	button.pressed.connect(_on_research_pressed.bind(node_id))
+	row.add_child(button)
 
-func _on_research_completed(faction_id: StringName, _new_tier: int) -> void:
+	return row
+
+## _refresh() itself sets _status_label, so the result message below must be
+## applied *after* it -- setting it first would just get immediately
+## clobbered (see DiplomacyPanel/PilotAssignmentPanel for the same fix).
+func _on_research_pressed(node_id: StringName) -> void:
+	var errors := TurnManager.start_research(_faction_id, node_id)
+	_refresh()
+	if not errors.is_empty():
+		_status_label.text = "研究開始に失敗しました: %s\n%s" % [errors[0], _status_label.text]
+
+func _on_research_completed(faction_id: StringName, _tech_id: StringName) -> void:
 	if faction_id == _faction_id:
 		_refresh()
 
