@@ -1421,8 +1421,9 @@ concrete gaps the smoke-test-only validation above couldn't catch:
   transition away from) -- a real, separate, and out-of-scope gap in
   `StrategicMap._on_phase_changed`'s auto-open trigger, not something this
   translation work needed to fix to be verified. Only event content was
-  translated (matching the specific request); every other `*_key` across
-  units/weapons/pilots/techs still renders as its raw key, unchanged.
+  translated in this first pass (matching the specific request at the
+  time); every other `*_key` across units/weapons/pilots/techs was left
+  as its raw key -- closed in a follow-up pass, see below.
 - **`StrategicMap`'s region side panel had two more real bugs live
   screenshots caught that headless tests structurally cannot**: (1) the
   panel's background was fully transparent (`bg_color` alpha 0, inherited
@@ -1535,6 +1536,32 @@ campaign now opens 初接触 immediately on reaching the strategic map, in
 the real Japanese text from the locale CSV above, and resolving its choice
 correctly chains into `nova_sub_001_border_skirmish` (already satisfied
 from campaign start too) before returning control to the map.
+
+**Every remaining untranslated `*_key` still visible anywhere in the UI is
+now translated too**, closing the gap the event-only pass above explicitly
+left open. `grep`ping every `tr(String(...))` call site across `scenes/`/
+`autoload/` first (rather than translating every `display_name_key`/
+`description_key` in the master data indiscriminately) found that only
+`display_name_key` is ever actually read anywhere -- `description_key`
+exists on `UnitDef`/`TechDef`/`PilotSkillDef`/`PilotDef` and is validated
+as non-empty by `master_data_validator.gd`, but no screen reads it yet, so
+translating it now would be speculative work for a UI that doesn't exist.
+29 more rows added to `res://locale/strings_ja.csv` covering every unit (3),
+weapon (3), pilot (2, matching the event system's existing `event.speaker.*`
+translations for the same two named pilots), tech (10), pilot skill (4),
+and achievement (7) `display_name_key`. Unit/weapon names use katakana
+transliteration of their English identifier (matching how `event.speaker.*`
+and this project's own faction/region names already read, e.g. "ノヴァ・
+スカウト"); tech/pilot-skill/achievement names are proper Japanese
+military/technical terms rather than transliterated -- e.g.
+`pilot_skill.aria_marksman_instinct.name` → "狙撃の勘", reusing the exact
+phrase the "司令デッキ化計画" design proposal's own FIG.04 pilot-card
+mockup already used for this. Verified two ways: a throwaway `--script`
+entry point asserting `tr()` on all 29 keys returns something other than
+the raw key back (all 29 pass), and live in a windowed build --
+`EncyclopediaPanel`'s unit/weapon cards and `DevelopmentPanel`'s tech list
+both show real Japanese names now instead of `unit.nova_scout.name`-style
+raw keys.
 
 ### Validation and setup
 
