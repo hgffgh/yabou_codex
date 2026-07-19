@@ -64,6 +64,7 @@ func setup(faction_id: StringName) -> void:
 	close_button.text = "閉じる"
 	close_button.custom_minimum_size = Vector2(0, 40)
 	close_button.pressed.connect(_on_close_pressed)
+	close_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(close_button)
 
 	_refresh()
@@ -218,6 +219,7 @@ func _build_pilot_row(pilot: PilotState, can_act: bool) -> Control:
 	assign_button.custom_minimum_size = Vector2(70, 36)
 	assign_button.disabled = not can_act or pilot.is_injured() or picker.item_count == 0 or picker.disabled
 	assign_button.pressed.connect(_on_assign_pressed.bind(pilot.pilot_id, picker))
+	assign_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	row.add_child(assign_button)
 
 	var unassign_button := Button.new()
@@ -225,6 +227,7 @@ func _build_pilot_row(pilot: PilotState, can_act: bool) -> Control:
 	unassign_button.custom_minimum_size = Vector2(70, 36)
 	unassign_button.disabled = not can_act or not pilot.is_assigned()
 	unassign_button.pressed.connect(_on_unassign_pressed.bind(pilot.pilot_id))
+	unassign_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	row.add_child(unassign_button)
 
 	section.add_child(row)

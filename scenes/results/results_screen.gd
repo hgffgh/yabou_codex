@@ -93,6 +93,7 @@ func _ready() -> void:
 	main_menu_button.text = "メインメニュー"
 	main_menu_button.custom_minimum_size = Vector2(200, 46)
 	main_menu_button.pressed.connect(func(): SceneRouter.goto_main_menu())
+	main_menu_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	button_row.add_child(main_menu_button)
 
 ## The turn-cap path already carries real scores; single-winner paths

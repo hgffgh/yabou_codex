@@ -97,6 +97,7 @@ func setup(faction_id: StringName) -> void:
 	close_button.text = "閉じる"
 	close_button.custom_minimum_size = Vector2(0, 40)
 	close_button.pressed.connect(_on_close_pressed)
+	close_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(close_button)
 
 	_refresh()
@@ -236,6 +237,7 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	var faction := GameState.get_faction(_faction_id)
 	gift_funds_button.disabled = not can_act or relation.gift_cooldown_turns > 0 or faction.funds < GameConstants.MIN_GIFT_FUNDS
 	gift_funds_button.pressed.connect(_on_gift_pressed.bind(other_id, GameConstants.MIN_GIFT_FUNDS, 0))
+	gift_funds_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	actions_row.add_child(gift_funds_button)
 
 	var gift_materials_button := Button.new()
@@ -243,6 +245,7 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	gift_materials_button.custom_minimum_size = Vector2(110, 36)
 	gift_materials_button.disabled = not can_act or relation.gift_cooldown_turns > 0 or faction.materials < GameConstants.MIN_GIFT_MATERIALS
 	gift_materials_button.pressed.connect(_on_gift_pressed.bind(other_id, 0, GameConstants.MIN_GIFT_MATERIALS))
+	gift_materials_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	actions_row.add_child(gift_materials_button)
 
 	section.add_child(actions_row)
@@ -278,6 +281,7 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	tech_gift_button.custom_minimum_size = Vector2(90, 36)
 	tech_gift_button.disabled = not can_act or relation.gift_cooldown_turns > 0 or tech_picker.disabled
 	tech_gift_button.pressed.connect(_on_tech_gift_pressed.bind(other_id, tech_picker))
+	tech_gift_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	tech_row.add_child(tech_gift_button)
 
 	section.add_child(tech_row)
@@ -315,6 +319,7 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	intel_button.disabled = not can_act or relation.intel_purchase_cooldown_turns > 0 \
 		or third_party_picker.disabled or faction.funds < GameConstants.INTEL_PURCHASE_COST_FUNDS
 	intel_button.pressed.connect(_on_intel_purchase_pressed.bind(other_id, third_party_picker))
+	intel_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	intel_row.add_child(intel_button)
 	section.add_child(intel_row)
 
@@ -346,6 +351,7 @@ func _build_ransom_row(unit_instance_id: StringName, can_act: bool) -> Control:
 	button.custom_minimum_size = Vector2(90, 36)
 	button.disabled = not can_act or faction == null or faction.funds < price
 	button.pressed.connect(_on_ransom_pressed.bind(unit_instance_id))
+	button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	row.add_child(button)
 
 	return row
@@ -359,6 +365,7 @@ func _build_proposal_button(other_id: StringName, treaty: GameEnums.TreatyType, 
 	button.custom_minimum_size = Vector2(110, 36)
 	button.disabled = not can_act or relation.treaty_type != GameEnums.TreatyType.NONE or relation.proposal_cooldown_turns > 0
 	button.pressed.connect(_on_propose_pressed.bind(other_id, treaty, duration))
+	button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	return button
 
 func _treaty_status_text(relation: RelationState) -> String:

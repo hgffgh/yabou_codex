@@ -31,6 +31,7 @@ var result_summary: Label
 var battle_started := false
 var game_state: Node
 var turn_manager: Node
+var audio_manager: Node
 var _squad_status_rows: Dictionary = {}  # StringName -> Dictionary of row controls
 
 func setup(value: BattleRuntimeState) -> void:
@@ -40,6 +41,7 @@ func _ready() -> void:
 	layer = 100
 	game_state = get_node("/root/GameState")
 	turn_manager = get_node("/root/TurnManager")
+	audio_manager = get_node("/root/AudioManager")
 	battle.require_round_confirmation = true
 	_build_hud()
 	_build_3d_world()
@@ -84,6 +86,17 @@ func _build_hud() -> void:
 	var retreat := Button.new()
 	retreat.text = "侵攻部隊を撤退"
 	retreat.pressed.connect(_request_attacker_retreat)
+	# audio_manager (resolved via get_node in _ready()) and the raw &"confirm"
+	# literal instead of AudioManager.SFX_CONFIRM -- same reason game_state/
+	# turn_manager are resolved via get_node() rather than a bare identifier
+	# in this file: a fresh --script test entry point that directly
+	# instantiates BattlePrototypeView eagerly compiles this whole class
+	# body, and ANY bare reference to the AudioManager autoload identifier
+	# (even just to read a constant off it) isn't resolvable yet at that
+	# point -- confirmed live, this is exactly what broke
+	# battle_view_smoke_test.gd (see this project's own established note on
+	# the headless compile-order bug elsewhere in this codebase).
+	retreat.pressed.connect(audio_manager.play_sfx.bind(&"confirm"))
 	controls.add_child(retreat)
 	_build_squad_status_sliver(controls)
 	_build_prebattle_panel(backdrop)

@@ -431,6 +431,7 @@ func _build_ui_overlay() -> void:
 	pilot_flyout_button.pressed.connect(func(): close_all_flyouts.call(); _on_pilot_assignment_pressed())
 	save_load_flyout_button.pressed.connect(func(): close_all_flyouts.call(); _on_save_load_pressed())
 	menu_flyout_button.pressed.connect(func(): close_all_flyouts.call(); SceneRouter.goto_main_menu())
+	menu_flyout_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 
 	military_rail_button.pressed.connect(func(): toggle_flyout.call(0))
 	system_rail_button.pressed.connect(func(): toggle_flyout.call(1))
@@ -618,6 +619,7 @@ func _build_ui_overlay() -> void:
 	_produce_button = Button.new()
 	_produce_button.text = "生産を予約"
 	_produce_button.pressed.connect(_on_produce_pressed)
+	_produce_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	info_panel.add_child(_produce_button)
 
 	# One row per queued job, not just the head's progress bar -- an
@@ -646,6 +648,7 @@ func _build_ui_overlay() -> void:
 	_move_button = Button.new()
 	_move_button.text = "移動命令"
 	_move_button.pressed.connect(_on_move_pressed)
+	_move_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	info_panel.add_child(_move_button)
 
 	_formation_button = Button.new()
@@ -1131,6 +1134,7 @@ func _open_formation_dialog(squad_id: StringName) -> void:
 		close_dialog.call()
 		_update_info_panel()
 	)
+	split_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	vbox.add_child(split_button)
 
 	var merge_row := HBoxContainer.new()
@@ -1156,12 +1160,14 @@ func _open_formation_dialog(squad_id: StringName) -> void:
 		close_dialog.call()
 		_update_info_panel()
 	)
+	merge_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	merge_row.add_child(merge_button)
 
 	var close_button := Button.new()
 	close_button.text = "閉じる"
 	close_button.custom_minimum_size = Vector2(0, 40)
 	close_button.pressed.connect(close_dialog)
+	close_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(close_button)
 
 ## One slot's full row: SLOT tag + unit name + HP/EN mini-gauges on top, then
@@ -1246,6 +1252,10 @@ func _build_formation_slot_row(squad_id: StringName, squad: SquadState, slot_ind
 		if not errors.is_empty(): _append_log("スロット変更に失敗しました: %s" % errors[0])
 		_update_info_panel()
 	)
+	# item_selected passes the chosen index, unlike Button.pressed -- a
+	# lambda instead of .bind() so AudioManager.play_sfx() isn't called
+	# with that index as an unwanted extra argument.
+	slot_option.item_selected.connect(func(_new_slot: int): AudioManager.play_sfx(AudioManager.SFX_CONFIRM))
 	controls.add_child(slot_option)
 
 	var en_button := Button.new()
@@ -1256,6 +1266,7 @@ func _build_formation_slot_row(squad_id: StringName, squad: SquadState, slot_ind
 		if not errors.is_empty(): _append_log("EN補給に失敗しました: %s" % errors[0])
 		else: _append_log("ENを最大まで補給しました。")
 	)
+	en_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	controls.add_child(en_button)
 
 	var repair_button := Button.new()
@@ -1268,6 +1279,7 @@ func _build_formation_slot_row(squad_id: StringName, squad: SquadState, slot_ind
 		close_dialog.call()
 		_update_info_panel()
 	)
+	repair_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	controls.add_child(repair_button)
 
 	return card

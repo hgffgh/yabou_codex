@@ -225,6 +225,18 @@ static func style_primary_button(button: Button) -> void:
 	button.add_theme_color_override("font_color", COLOR_GOLD)
 	button.add_theme_color_override("font_hover_color", COLOR_GOLD)
 	button.add_theme_color_override("font_pressed_color", COLOR_GOLD)
+	# Every "the one primary action on this screen" button is, definitionally,
+	# a 決定 (confirm) action -- hooking SFX here instead of at each of this
+	# style's ~10 call sites individually means 行動終了/30秒ラウンド開始/
+	# 戦略画面へ戻る etc. all get sound automatically, with nothing further
+	# to wire once a real audio file exists (see AudioManager's own doc
+	# comment on why this fires unconditionally with no asset yet). Routed
+	# through _play_sfx() rather than a bare `AudioManager.play_sfx.bind(...)`
+	# -- see that function's own comment for why a bare autoload reference
+	# right here breaks a fresh --script test that directly instantiates a
+	# scene calling into this style (confirmed live: this is exactly what
+	# broke battle_view_smoke_test.gd).
+	button.pressed.connect(_play_sfx.bind(&"confirm"))
 
 ## The destructive counterpart to style_primary_button(): always-red border
 ## and text for an irreversible/adversarial action (breaking a treaty,
@@ -240,6 +252,33 @@ static func style_danger_button(button: Button) -> void:
 	button.add_theme_color_override("font_color", COLOR_DANGER)
 	button.add_theme_color_override("font_hover_color", COLOR_DANGER)
 	button.add_theme_color_override("font_pressed_color", COLOR_DANGER)
+	# Same reasoning as style_primary_button's own SFX hook (including the
+	# _play_sfx() routing, not a bare AudioManager reference), just 警告
+	# (warning) instead of 決定 -- every button styled as destructive/
+	# adversarial already is, by definition, the 警告 case.
+	button.pressed.connect(_play_sfx.bind(&"warning"))
+
+## Plays one AudioManager SFX category without ever bare-referencing the
+## AudioManager identifier -- resolved dynamically through the active
+## SceneTree instead. A `RefCounted` static utility (this whole file) has no
+## _ready()/scene-tree context of its own to get_node() from the way a Node
+## script would, and a bare `AudioManager.play_sfx(...)` call here breaks
+## any fresh --script test whose entry point transitively compiles this
+## file before the engine's own autoload boot has registered it -- confirmed
+## live, this is exactly what broke battle_view_smoke_test.gd (which directly
+## instantiates BattlePrototypeView, itself calling into style_primary_button()
+## here). Silently no-ops if the SceneTree/autoload isn't available at all
+## (e.g. a `--script` test that constructs a Button and calls this without
+## ever booting the full engine loop), matching AudioManager.play_sfx()'s
+## own "silently do nothing until a real audio file exists" contract.
+static func _play_sfx(id: StringName) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	var audio_manager := tree.root.get_node_or_null("AudioManager")
+	if audio_manager == null:
+		return
+	audio_manager.play_sfx(id)
 
 ## Steps a Label's displayed integer from from_value to to_value over ~0.45s
 ## instead of the text just silently changing, then settles from a bright

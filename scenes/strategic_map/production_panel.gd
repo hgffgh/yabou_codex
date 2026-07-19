@@ -71,6 +71,7 @@ func setup() -> void:
 	close_button.text = "閉じる"
 	close_button.custom_minimum_size = Vector2(0, 40)
 	close_button.pressed.connect(_on_close_pressed)
+	close_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(close_button)
 
 	_refresh()
@@ -204,6 +205,7 @@ func _build_region_card(region: Region, facility_id: StringName, can_act: bool) 
 			_status_label.text = "%s で %s の生産を登録しました。" % [region.def.display_name, tr(String(unit_def.display_name_key))]
 		_refresh()
 	)
+	reserve_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	picker_row.add_child(reserve_button)
 
 	return card

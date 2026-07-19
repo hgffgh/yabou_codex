@@ -51,6 +51,7 @@ func _ready() -> void:
 	quit_button.text = "終了"
 	quit_button.custom_minimum_size = Vector2(240, 48)
 	quit_button.pressed.connect(func(): get_tree().quit())
+	quit_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(quit_button)
 
 func _spacer(height: float) -> Control:

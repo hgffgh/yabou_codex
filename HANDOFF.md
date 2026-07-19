@@ -1563,6 +1563,59 @@ the raw key back (all 29 pass), and live in a windowed build --
 both show real Japanese names now instead of `unit.nova_scout.name`-style
 raw keys.
 
+**The SFX call-hook wiring the Command Deck redesign explicitly deferred
+(no audio assets, so "dead hooks nothing plays through yet" felt premature
+at the time) is now wired everywhere, on request, while still genuinely
+silent** -- `AudioManager` gained `SFX_CONFIRM`/`SFX_CANCEL`/`SFX_WARNING`
+category constants, a `sfx_streams` dictionary every entry of which starts
+`null`, `register_sfx(id, stream)` as the one call site that needs to
+change once real audio files exist, and `play_sfx(id)` (a small round-robin
+`AudioStreamPlayer` pool, so two SFX firing in quick succession don't cut
+each other off) that already no-ops safely against the current all-null
+dictionary. Every button across every panel that commits a real action
+(生産を予約, 移動命令, 研究開始, 搭乗/解除, セーブ/ロード, EN補給/修理開始,
+条約提案/破棄/贈与, event choices, etc.) now calls `play_sfx()` on press --
+`style_primary_button()`/`style_danger_button()` in `ui_theme.gd` hook
+`SFX_CONFIRM`/`SFX_WARNING` centrally (covering 行動終了, 30秒ラウンド開始,
+条約破棄, and every other button already using those two styles, with
+nothing further to wire at each of their ~10 call sites), and every panel's
+own 閉じる/戻る button is hooked to `SFX_CANCEL` individually. Deliberately
+left unhooked: pure navigation (the rail/flyout rows that only open a
+panel, e.g. 部隊編成..., パイロット編成), selection/toggle controls that
+don't commit anything by themselves (faction/difficulty pickers, the 分割
+`CheckButton`s, every `OptionButton`), and the battle view's
+pause/speed-scale buttons (too frequent, would be noisy) -- matching the
+design proposal's own three-category scope rather than a sound on every
+possible click.
+- Found and fixed a real, reproducible instance of this project's own
+  documented headless compile-order bug while wiring this: a bare
+  `AudioManager.play_sfx(...)` reference added directly inside
+  `battle_prototype_view.gd` (and, transitively, inside
+  `ui_theme.gd`'s `style_primary_button()`/`style_danger_button()`, which
+  `battle_prototype_view.gd` also calls) broke
+  `res://tests/battle_view_smoke_test.gd` with `SCRIPT ERROR: Compile
+  Error: Identifier not found: AudioManager` -- this test's entry point
+  directly instantiates `BattlePrototypeView`, and per this file's own
+  established pattern (`game_state`/`turn_manager` are already resolved via
+  `get_node("/root/...")` rather than bare identifiers for exactly this
+  reason), a bare autoload reference anywhere in that class's eagerly-
+  compiled body isn't resolvable yet at that point. Fixed the same way:
+  `battle_prototype_view.gd` gained an `audio_manager` member resolved via
+  `get_node()` in `_ready()`, and its one direct SFX call uses that plus a
+  raw `&"confirm"` literal instead of the `AudioManager.SFX_CONFIRM`
+  constant (reading a constant off the bare autoload name still counts as
+  a bare reference). `ui_theme.gd` has no `_ready()`/scene-tree context of
+  its own to `get_node()` from (it's a `RefCounted` static utility, not a
+  `Node`), so it gained a new `_play_sfx(id)` helper that resolves
+  `AudioManager` dynamically through `Engine.get_main_loop()` instead,
+  silently no-oping if the SceneTree or the autoload node isn't there --
+  both `style_primary_button`/`style_danger_button` route through this
+  instead of a bare reference now. Confirmed fixed: the full test suite
+  (37 files) passes headless, and live in a windowed build, clicking
+  through events/production/diplomacy/etc. produces zero script errors
+  with the (still fully silent, no audio files registered) hooks firing
+  on every press.
+
 ### Validation and setup
 
 - The Command Deck redesign was checked by re-running

@@ -62,6 +62,7 @@ func setup(faction_id: StringName) -> void:
 	close_button.text = "閉じる"
 	close_button.custom_minimum_size = Vector2(0, 40)
 	close_button.pressed.connect(_on_close_pressed)
+	close_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(close_button)
 
 	TurnManager.research_completed.connect(_on_research_completed)
@@ -140,6 +141,7 @@ func _build_node_row(faction: Faction, node_id: StringName, can_act: bool) -> Co
 	button.custom_minimum_size = Vector2(90, 36)
 	button.disabled = not can_act or node.researched or faction.current_research != null or not prereq_met
 	button.pressed.connect(_on_research_pressed.bind(node_id))
+	button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	row.add_child(button)
 
 	return row

@@ -85,6 +85,7 @@ func setup() -> void:
 	close_button.text = "閉じる"
 	close_button.custom_minimum_size = Vector2(0, 40)
 	close_button.pressed.connect(_on_close_pressed)
+	close_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(close_button)
 
 	_refresh()
@@ -122,6 +123,7 @@ func _refresh() -> void:
 		save_button.custom_minimum_size = Vector2(80, 36)
 		save_button.disabled = not can_save
 		save_button.pressed.connect(_on_save_pressed.bind(slot))
+		save_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 		row.add_child(save_button)
 
 		var load_button := Button.new()
@@ -129,6 +131,7 @@ func _refresh() -> void:
 		load_button.custom_minimum_size = Vector2(80, 36)
 		load_button.disabled = not slots_by_number.has(slot)
 		load_button.pressed.connect(_on_load_pressed.bind(slot))
+		load_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 		row.add_child(load_button)
 
 		_slot_rows.add_child(row)
@@ -163,6 +166,7 @@ func _refresh() -> void:
 		aload_button.custom_minimum_size = Vector2(80, 36)
 		aload_button.disabled = not autosaves_by_number.has(slot)
 		aload_button.pressed.connect(_on_load_pressed.bind(slot, true))
+		aload_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 		arow.add_child(aload_button)
 
 		_autosave_rows.add_child(arow)

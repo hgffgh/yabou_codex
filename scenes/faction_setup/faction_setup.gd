@@ -101,6 +101,7 @@ func _ready() -> void:
 	back_button.text = "戻る"
 	back_button.custom_minimum_size = Vector2(240, 40)
 	back_button.pressed.connect(func(): SceneRouter.goto_main_menu())
+	back_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 	vbox.add_child(back_button)
 
 func _spacer(height: float) -> Control:

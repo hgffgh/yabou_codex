@@ -80,6 +80,7 @@ func setup(faction_id: StringName) -> void:
 	_next_button.text = "次へ"
 	_next_button.custom_minimum_size = Vector2(0, 40)
 	_next_button.pressed.connect(_on_next_pressed)
+	_next_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 	vbox.add_child(_next_button)
 
 	_load_next_pending_event()
@@ -153,6 +154,7 @@ func _show_choices(def: EventDef) -> void:
 			button.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 		)
 		button.pressed.connect(_on_choice_pressed.bind(StringName(choice.get("id", ""))))
+		button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CONFIRM))
 		_choice_box.add_child(button)
 
 func _on_choice_pressed(choice_id: StringName) -> void:
