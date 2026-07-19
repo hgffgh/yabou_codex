@@ -75,10 +75,15 @@ def build_rig():
 
 
 def add_box_part(name, bone, size, center):
+    # primitive_cube_add(size=1) already spans -0.5..+0.5 (edge length 1) on
+    # each axis, so scaling by `size` directly yields final edge length
+    # `size` -- scaling by size/2 (as this used to) halved every box's
+    # actual dimensions, which is what caused Torso/Head to render half as
+    # tall as their bone placement assumed and visibly float apart.
     bpy.ops.mesh.primitive_cube_add(size=1, location=center)
     obj = bpy.context.object
     obj.name = name
-    obj.scale = (size[0] / 2.0, size[1] / 2.0, size[2] / 2.0)
+    obj.scale = (size[0], size[1], size[2])
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     vg = obj.vertex_groups.new(name=bone)
     vg.add(range(len(obj.data.vertices)), 1.0, 'REPLACE')
