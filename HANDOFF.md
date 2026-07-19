@@ -1658,6 +1658,28 @@ button`/the panel's own back-button wiring) with the window staying
 responsive and the console log showing nothing beyond the pre-existing
 benign SteamManager warning.
 
+Units currently have no animation of any kind: `battle_prototype_view.gd`'s
+`_build_squad_visuals` draws each one as a single static `Sprite3D`
+billboard (`icon`/`vignette_sprite`, faction-tinted via `.modulate`), and
+`UnitDef.model_scene` — schema-required since the data-foundation milestone
+and documented in DATA_DEFINITION.md section 9 as "3DモデルScene" — is
+never actually read by any rendering code; every unit's `model_scene`
+points at the same empty-`Node3D` stub, `scenes/units/placeholder_unit_model.tscn`.
+Real rigged models are an asset-production task well outside what this
+codebase's usual "ship plain-but-functional UI ahead of final art"
+approach can placeholder its way around (unlike SFX, a 3D model can't be
+usefully synthesized in code) -- so for now only the *spec* was nailed
+down, in a new DATA_DEFINITION.md section 9.1.1: expected glTF (`.glb`)
+pipeline, the coordinate/scale convention to match the current billboard's
+numbers (ground-plane origin, `-Z` forward, ~80-90 units tall at
+`size == STANDARD`, 0.8x/1.35x for LIGHT/HEAVY), five named `AnimationPlayer`
+clips (`idle`/`move`/`attack`/`hit`/`destroyed`), the no-baked-team-color
+material rule (captured units change `owner_faction_id`, so the tint has to
+stay runtime-applied the same way `Sprite3D.modulate` does it today), and a
+2,000-5,000 triangle / ≤1024×1024 / ideally-one-material budget. Wiring
+`_build_squad_visuals` to actually instantiate `model_scene` and drive
+these clips is real remaining work once models matching that spec exist.
+
 ### Validation and setup
 
 - The Command Deck redesign was checked by re-running
