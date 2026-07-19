@@ -424,8 +424,9 @@ active (`GameState.plan_squad_movement`), unilateral treaty-breaking with
 its friendship and success-rate penalties, resource gifting, intel purchase
 building on the existing `IntelRecordState` machinery, and captured-unit
 ransom. A `DiplomacyPanel` (mirroring `SaveLoadPanel`'s style) exposes
-proposals, treaty-breaking, and gifting from the strategic map; intel
-purchase and ransom are backend-only for now (see the numbered list below).
+proposals, treaty-breaking, gifting, intel purchase (with a third-party
+picker, architecturally complete but practically inert until a third living
+faction exists), and captured-unit ransom, all from the strategic map.
 Every `Diplomacy` function takes `game_state` as an explicit first
 parameter instead of reading the `GameState` autoload by its bare
 identifier — see the "Validation and setup" section's note on the headless
@@ -763,9 +764,8 @@ still missing (art assets, VN-style playback controls, the recap screen):
   affordance at all, which trivially satisfies section 7's one hard
   requirement ("選択肢到達時に早送り・スキップを停止する", never skipping
   past an unread choice) by not implementing skip in the first place. The
-  回想 (recap) screen itself — a UI browsing `profile.viewed_event_ids` — also
-  isn't built; the data it would read (`ProfileState.viewed_event_ids`) is
-  in place and already covered by `event_system_test.gd`.
+  回想 (recap) screen was left unbuilt at the time — see the RecapPanel
+  paragraph further down for where it landed.
 
 Four smaller gaps that had accumulated as deferrals across earlier milestones
 are now closed:
@@ -1615,6 +1615,32 @@ possible click.
   through events/production/diplomacy/etc. produces zero script errors
   with the (still fully silent, no audio files registered) hooks firing
   on every press.
+
+The 回想 (recap) screen (EVENT_DETAIL_SPECIFICATION.md sections 6/9), the
+last piece the event-system milestone left unbuilt, now exists: a new
+`RecapPanel` (mirroring the other overlay panels' style) reads
+`ProfileState.viewed_event_ids` (every MAIN event ever resolved across every
+campaign this profile has played, plus any once_per_profile SUB event) into
+a "主要イベント" section, and `CampaignRuntimeState.campaign_event_history`
+(every SUB event resolved this campaign only, in resolution order, cleared
+on a new campaign) into a "今回の履歴（補助イベント）" section below it.
+Each row shows a 主要/補助 badge, the event's title in its origin faction's
+color, and — only when resolvable — a dim second line naming the choice
+actually made, read from `Faction.event_flags["choice:<event_id>"]`; since
+that dictionary resets every new campaign, a recap entry left over from an
+earlier playthrough has nothing to look up and just omits the line, rather
+than guessing. Opened from a new "回想" row in the strategic map's システム
+flyout, alongside セーブ/ロード. Read-only, matching EncyclopediaPanel — no
+_status_label, no can_act gating. Confirmed live: triggered nova_republic's
+turn-1 MAIN event (初接触) and its immediately-following SUB event (国境の
+小競り合い), picked the diplomatic choice, then opened 回想 and saw both
+rows with the correct badge, faction-colored title, and the chosen option's
+label under the MAIN entry.
+
+While scoping this, found `DiplomacyPanel`'s intel-purchase and ransom UI
+already existed and had for several commits (`27b4067`) — this document's
+own "Recommended next task" prose above still described them as backend-
+only, left over from before that panel was built out; corrected in place.
 
 ### Validation and setup
 

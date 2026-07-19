@@ -405,6 +405,7 @@ func _build_ui_overlay() -> void:
 
 	var system_flyout := _build_flyout(rail_right, content_top, ribbon_top - content_top, FLYOUT_WIDTH)
 	var save_load_flyout_button := _build_flyout_row(system_flyout, "セーブ/ロード", FLYOUT_WIDTH)
+	var recap_flyout_button := _build_flyout_row(system_flyout, "回想", FLYOUT_WIDTH)
 	var menu_flyout_button := _build_flyout_row(system_flyout, "メインメニューへ戻る", FLYOUT_WIDTH)
 	root.add_child(system_flyout)
 
@@ -430,6 +431,7 @@ func _build_ui_overlay() -> void:
 	formation_flyout_button.pressed.connect(func(): close_all_flyouts.call(); _on_formation_pressed())
 	pilot_flyout_button.pressed.connect(func(): close_all_flyouts.call(); _on_pilot_assignment_pressed())
 	save_load_flyout_button.pressed.connect(func(): close_all_flyouts.call(); _on_save_load_pressed())
+	recap_flyout_button.pressed.connect(func(): close_all_flyouts.call(); _on_recap_pressed())
 	menu_flyout_button.pressed.connect(func(): close_all_flyouts.call(); SceneRouter.goto_main_menu())
 	menu_flyout_button.pressed.connect(AudioManager.play_sfx.bind(AudioManager.SFX_CANCEL))
 
@@ -1352,6 +1354,11 @@ func _on_production_pressed() -> void:
 
 func _on_pilot_assignment_pressed() -> void:
 	var panel := PilotAssignmentPanel.new()
+	add_child(panel)
+	panel.setup(GameState.player_faction_id)
+
+func _on_recap_pressed() -> void:
+	var panel := RecapPanel.new()
 	add_child(panel)
 	panel.setup(GameState.player_faction_id)
 
