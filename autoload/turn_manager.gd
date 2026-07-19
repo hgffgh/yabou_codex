@@ -358,8 +358,18 @@ func commit_turn() -> void:
 				return
 			GameState.advance_turn()
 			active_faction_index = 0
-			_begin_faction_turn()
+			# is_resolving_turn must already be false *before* _begin_faction_turn()
+			# runs -- it emits active_faction_changed/phase_changed synchronously,
+			# and StrategicMap._update_turn_ui() (listening to both) reads
+			# is_resolving_turn to decide whether to show "行動終了" or "AI行動中".
+			# Flipping it after the call left that first post-turn-transition
+			# UI refresh computed against the stale (still-resolving) value, so
+			# the end-turn button stayed disabled/"AI行動中" forever with
+			# nothing left to ever refresh it again -- confirmed live: turn
+			# resolution itself completes correctly (control silently returns
+			# to the player), only the button never re-enables.
 			is_resolving_turn = false
+			_begin_faction_turn()
 			return
 		_begin_faction_turn()
 		# _begin_faction_turn emits active_faction_changed synchronously, but

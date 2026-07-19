@@ -1637,6 +1637,37 @@ turn-1 MAIN event (初接触) and its immediately-following SUB event (国境の
 rows with the correct badge, faction-colored title, and the chosen option's
 label under the MAIN entry.
 
+A real, previously-unknown bug reported live during play: after ending a
+turn, the strategic map's end-turn button got stuck reading "AI行動中"
+(disabled) forever, even on a turn with no combat at all -- confirmed via
+a headless repro (`turn_manager.commit_turn()`, polling `is_resolving_turn`
+frame by frame) that `commit_turn()` itself finishes fully and correctly;
+the game is completely playable underneath, only the button never
+re-enables, so the player has no way to know that and just waits forever
+on a button that will never change. Root cause, in `TurnManager.commit_turn`'s
+turn-wraparound branch: `_begin_faction_turn()` (which emits
+`active_faction_changed`/`phase_changed` synchronously, both of which
+`StrategicMap._update_turn_ui()` listens to) was called *before*
+`is_resolving_turn` was set back to `false`, so that very first
+post-transition UI refresh read the still-`true` value and disabled the
+button -- with no further signal left to ever refresh it again. Fixed by
+flipping `is_resolving_turn = false` before calling `_begin_faction_turn()`
+instead of after. `tests/turn_ui_refresh_test.gd` reproduces it end-to-end
+(load the strategic map scene for real, `commit_turn()`, poll until
+resolved, assert the button re-enabled) and fails against the pre-fix code
+(confirmed by temporarily reverting the fix and re-running it) while
+passing against the fix.
+Diagnosing this destroyed the reporting player's actual autosave data: an
+earlier headless repro attempt didn't realize `commit_turn()`'s own
+`_autosave()` calls write to the exact same `user://saves/autosave_NN.json`
+rotation the live game uses, so a synthetic test campaign silently
+overwrote the real one mid-investigation. Recovered by locating the still-
+live game process's most-recently-modified autosave slot, copying it out
+before any further headless runs touched the directory again, and copying
+it back once the real repro was done. Any future live-repro session should
+back up `user://saves/` first, before running anything that calls
+`commit_turn()` against the shared save directory.
+
 While scoping this, found `DiplomacyPanel`'s intel-purchase and ransom UI
 already existed and had for several commits (`27b4067`) — this document's
 own "Recommended next task" prose above still described them as backend-
