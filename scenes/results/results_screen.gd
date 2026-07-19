@@ -86,6 +86,7 @@ func _ready() -> void:
 	play_again.text = "もう一度プレイ"
 	play_again.custom_minimum_size = Vector2(200, 46)
 	play_again.pressed.connect(func(): SceneRouter.goto_faction_setup())
+	UITheme.style_primary_button(play_again)
 	button_row.add_child(play_again)
 
 	var main_menu_button := Button.new()

@@ -32,18 +32,25 @@ func setup() -> void:
 	root.add_child(center)
 	UIUtils.fill_parent(center)
 
-	var card := UITheme.make_card(Vector2(560, 640))
+	# 560/512 let a populated slot's label ("スロット0: ターン1 / ノヴァ共和国
+	# / 2026-07-17 05:30:31", well past the label's 320 *minimum* width --
+	# Label sizes to fit its own text past that floor) push the row wider
+	# than the scroll, clipping the ロード button and forcing a horizontal
+	# scrollbar. Widened, plus label.clip_text below as a safety net so an
+	# even longer faction name/timestamp ellipsizes instead of ever
+	# repeating this.
+	var card := UITheme.make_card(Vector2(680, 640))
 	center.add_child(card)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	vbox.position = Vector2(24, 20)
-	vbox.size = Vector2(512, 600)
+	vbox.size = Vector2(632, 600)
 	card.add_child(vbox)
 
 	var title := Label.new()
 	title.text = "セーブ / ロード"
-	title.add_theme_font_size_override("font_size", 24)
+	UITheme.style_display_label(title, 24)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
@@ -53,7 +60,7 @@ func setup() -> void:
 	vbox.add_child(_status_label)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(512, 320)
+	scroll.custom_minimum_size = Vector2(632, 320)
 	vbox.add_child(scroll)
 	_slot_rows = VBoxContainer.new()
 	_slot_rows.add_theme_constant_override("separation", 6)
@@ -64,7 +71,9 @@ func setup() -> void:
 	## 表示する". Autosaves are load-only from this panel -- they're only
 	## ever written automatically by TurnManager._autosave.
 	var autosave_title := Label.new()
-	autosave_title.text = "オートセーブ"
+	autosave_title.text = UITheme.bracket("AUTOSAVE オートセーブ")
+	UITheme.style_mono_label(autosave_title, 11)
+	autosave_title.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 	autosave_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(autosave_title)
 	_autosave_rows = VBoxContainer.new()
@@ -94,15 +103,18 @@ func _refresh() -> void:
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		var label := Label.new()
-		label.custom_minimum_size = Vector2(320, 0)
+		label.custom_minimum_size = Vector2(452, 0)
+		label.clip_text = true
 		if slots_by_number.has(slot):
 			var entry: Dictionary = slots_by_number[slot]
 			var fdef: FactionDef = GameState.faction_defs.get(entry.player_faction_id)
 			var faction_name := fdef.display_name if fdef != null else String(entry.player_faction_id)
 			var datetime := Time.get_datetime_string_from_unix_time(int(entry.saved_at_unix), true)
 			label.text = "スロット%d: ターン%d / %s / %s" % [slot, int(entry.turn_number), faction_name, datetime]
+			label.add_theme_color_override("font_color", UITheme.COLOR_TEXT)
 		else:
 			label.text = "スロット%d: (空)" % slot
+			label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 		row.add_child(label)
 
 		var save_button := Button.new()
@@ -132,15 +144,18 @@ func _refresh() -> void:
 		arow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		var alabel := Label.new()
-		alabel.custom_minimum_size = Vector2(400, 0)
+		alabel.custom_minimum_size = Vector2(532, 0)
+		alabel.clip_text = true
 		if autosaves_by_number.has(slot):
 			var entry: Dictionary = autosaves_by_number[slot]
 			var fdef: FactionDef = GameState.faction_defs.get(entry.player_faction_id)
 			var faction_name := fdef.display_name if fdef != null else String(entry.player_faction_id)
 			var datetime := Time.get_datetime_string_from_unix_time(int(entry.saved_at_unix), true)
 			alabel.text = "オート%d: ターン%d / %s / %s" % [slot, int(entry.turn_number), faction_name, datetime]
+			alabel.add_theme_color_override("font_color", UITheme.COLOR_TEXT)
 		else:
 			alabel.text = "オート%d: (空)" % slot
+			alabel.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
 		arow.add_child(alabel)
 
 		var aload_button := Button.new()

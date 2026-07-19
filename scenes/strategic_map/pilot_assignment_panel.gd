@@ -43,7 +43,7 @@ func setup(faction_id: StringName) -> void:
 
 	var title := Label.new()
 	title.text = "パイロット編成"
-	title.add_theme_font_size_override("font_size", 24)
+	UITheme.style_display_label(title, 24)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
@@ -90,20 +90,114 @@ func _build_pilot_row(pilot: PilotState, can_act: bool) -> Control:
 	section.add_theme_constant_override("separation", 4)
 
 	var next_req := GameConstants.pilot_exp_to_next_level(pilot.level)
-	var exp_text := "EXP %d/%d" % [pilot.current_exp, next_req] if next_req > 0 else "EXP上限"
-	var injury_text := " / 負傷中(残り%dターン)" % pilot.injury_turns_remaining if pilot.is_injured() else ""
-	var header := Label.new()
-	header.text = "%s ── Lv%d (%s)%s / %s" % [
-		tr(String(pilot_def.display_name_key)) if pilot_def != null else String(pilot.pilot_id),
-		pilot.level, exp_text, injury_text, _assignment_text(pilot),
-	]
-	header.autowrap_mode = TextServer.AUTOWRAP_WORD
-	section.add_child(header)
+	var progress := float(pilot.current_exp) / float(next_req) if next_req > 0 else 1.0
+	var owner_fdef: FactionDef = GameState.faction_defs.get(pilot.owner_faction_id)
+	var ring_color := UITheme.COLOR_DANGER if pilot.is_injured() \
+		else (owner_fdef.color if owner_fdef != null else UITheme.COLOR_GOLD)
+
+	# A radial EXP gauge (level centered inside) replaces the old separate
+	# "Lv%d" label + linear ProgressBar + "EXP N/M" label -- how close to
+	# leveling up and what level now read from one glyph. It also doubles as
+	# the injury indicator: the ring itself turns COLOR_DANGER instead of
+	# needing a second colored label to say the same thing.
+	var top_row := HBoxContainer.new()
+	top_row.add_theme_constant_override("separation", 16)
+	section.add_child(top_row)
+
+	var ring := ExpRing.new()
+	ring.custom_minimum_size = Vector2(56, 56)
+	ring.setup(pilot.level, progress, ring_color)
+	top_row.add_child(ring)
+
+	var info_col := VBoxContainer.new()
+	info_col.add_theme_constant_override("separation", 4)
+	info_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_row.add_child(info_col)
+
+	# A plain Control (not HBoxContainer) with plain absolute position/size on
+	# both labels, NOT an HBoxContainer + SIZE_EXPAND_FILL-flagged
+	# status_label -- see the matching, more detailed comment on
+	# StrategicMap._build_info_row for how this was found: at this nesting
+	# depth (CanvasLayer > ... > ScrollContainer > VBoxContainer rows), an
+	# EXPAND-flagged Label renders fully invisible in this Godot version
+	# despite every introspectable property on it reporting correct,
+	# on-screen values, confirmed live against a deferred
+	# get_viewport().get_texture().get_image() capture. 580 is info_col's
+	# known fixed width (652 vbox - 56 ring - 16 separation, both constants
+	# a few lines up).
+	var name_row := Control.new()
+	name_row.custom_minimum_size = Vector2(0, 24)
+	info_col.add_child(name_row)
+	var name_label := Label.new()
+	name_label.text = tr(String(pilot_def.display_name_key)) if pilot_def != null else String(pilot.pilot_id)
+	UITheme.style_display_label(name_label, 16)
+	name_label.position = Vector2(0, 0)
+	name_label.size = Vector2(330, 24)
+	name_row.add_child(name_label)
+	var status_label := Label.new()
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UITheme.style_mono_label(status_label, 11)
+	if pilot.is_injured():
+		status_label.text = UITheme.bracket("負傷中・残り%dターン" % pilot.injury_turns_remaining)
+		status_label.add_theme_color_override("font_color", UITheme.COLOR_DANGER)
+	else:
+		status_label.text = UITheme.bracket("出撃可能")
+		status_label.add_theme_color_override("font_color", UITheme.COLOR_GOOD)
+	status_label.position = Vector2(330, 0)
+	status_label.size = Vector2(580.0 - 330.0, 24)
+	name_row.add_child(status_label)
+
+	var exp_label := Label.new()
+	exp_label.text = "EXP %d/%d" % [pilot.current_exp, next_req] if next_req > 0 else "EXP上限"
+	UITheme.style_mono_label(exp_label, 11)
+	exp_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	info_col.add_child(exp_label)
+
+	# Unlocked passive skills as chips -- STRATEGY_DETAIL_SPECIFICATION.md
+	# section 5.6's skills were already readable by BattleCombatSystem but
+	# never surfaced anywhere in the strategic UI before this. A skill not
+	# yet reached by the pilot's current level still shows (so the player
+	# can see what's coming) but stays dim instead of COLOR_GOOD.
+	if pilot_def != null and not pilot_def.skill_ids.is_empty():
+		var chip_row := HBoxContainer.new()
+		chip_row.add_theme_constant_override("separation", 14)
+		info_col.add_child(chip_row)
+		for skill_id: StringName in pilot_def.skill_ids:
+			var skill_def: PilotSkillDef = GameState.master_data.pilot_skills.get(skill_id)
+			if skill_def == null:
+				continue
+			var chip := Label.new()
+			chip.text = "%s（Lv%d）" % [tr(String(skill_def.display_name_key)), skill_def.unlock_level]
+			UITheme.style_mono_label(chip, 10.5)
+			chip.add_theme_color_override(
+				"font_color",
+				UITheme.COLOR_GOOD if pilot.level >= skill_def.unlock_level else UITheme.COLOR_TEXT_DIM
+			)
+			chip_row.add_child(chip)
+
+	var assignment_label := Label.new()
+	assignment_label.text = _assignment_text(pilot)
+	assignment_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	assignment_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	section.add_child(assignment_label)
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	var picker := OptionButton.new()
-	picker.custom_minimum_size = Vector2(360, 36)
+	# 360 clipped this OptionButton's own item text (unit name, region, and
+	# assignment status all concatenated) -- the row has ample room up to
+	# ~500 (scroll width 652 minus the two 70px buttons and separation)
+	# before crowding them, matching the same clipping issue and fix as
+	# StrategicMap's production/fleet-dispatch dropdowns.
+	picker.custom_minimum_size = Vector2(480, 36)
+	picker.clip_text = true
+	# fit_to_longest_item defaults to true and overrides clip_text for this
+	# button's own reported minimum size -- see StrategicMap._build_ui_overlay's
+	# matching, more detailed comment on _production_option for how this was
+	# found (confirmed live, a windowed build screenshot showing an
+	# OptionButton physically overflowing its row despite clip_text alone).
+	picker.fit_to_longest_item = false
 	var eligible := _eligible_units(pilot)
 	var selected_index := -1
 	for i in range(eligible.size()):

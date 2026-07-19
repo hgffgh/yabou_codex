@@ -60,7 +60,7 @@ func setup(faction_id: StringName) -> void:
 
 	var title := Label.new()
 	title.text = "外交"
-	title.add_theme_font_size_override("font_size", 24)
+	UITheme.style_display_label(title, 24)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
@@ -138,17 +138,74 @@ func _refresh() -> void:
 
 func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	var fdef: FactionDef = GameState.faction_defs.get(other_id)
+	var player_fdef: FactionDef = GameState.faction_defs.get(_faction_id)
 	var section := VBoxContainer.new()
-	section.add_theme_constant_override("separation", 4)
+	section.add_theme_constant_override("separation", 6)
 
 	var relation := GameState.campaign_runtime.get_relation_state(_faction_id, other_id)
-	var header := Label.new()
-	header.text = "%s ── 友好度 %d (%s) / %s" % [
-		fdef.display_name if fdef != null else String(other_id),
-		relation.friendship, BAND_LABELS.get(relation.relation_band(), "?"),
-		_treaty_status_text(relation),
-	]
-	section.add_child(header)
+	var band: int = relation.relation_band()
+	var band_color := UITheme.COLOR_TEXT_DIM
+	if band == GameEnums.RelationBand.FRIENDLY or band == GameEnums.RelationBand.CLOSE:
+		band_color = UITheme.COLOR_GOOD
+	elif band == GameEnums.RelationBand.HOSTILE or band == GameEnums.RelationBand.NEMESIS:
+		band_color = UITheme.COLOR_DANGER
+
+	# A faction crest either side of a center-out relationship gauge, in
+	# place of the old plain name label -- which side the gauge's fill grows
+	# toward reads at a glance, replacing the old left-aligned (-100..100)
+	# ProgressBar that could only ever grow rightward regardless of sign.
+	var heads_row := HBoxContainer.new()
+	heads_row.add_theme_constant_override("separation", 10)
+	section.add_child(heads_row)
+
+	var self_side := HBoxContainer.new()
+	self_side.add_theme_constant_override("separation", 8)
+	heads_row.add_child(self_side)
+	if player_fdef != null and player_fdef.emblem:
+		var self_crest := FactionCrest.new()
+		self_crest.setup(player_fdef, 34.0)
+		self_side.add_child(self_crest)
+	var self_name_label := Label.new()
+	self_name_label.text = player_fdef.display_name if player_fdef != null else String(_faction_id)
+	UITheme.style_display_label(self_name_label, 13)
+	self_name_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	self_side.add_child(self_name_label)
+
+	var gauge := RelationGauge.new()
+	gauge.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gauge.set_value(relation.friendship, band_color)
+	heads_row.add_child(gauge)
+
+	var other_side := HBoxContainer.new()
+	other_side.add_theme_constant_override("separation", 8)
+	heads_row.add_child(other_side)
+	var name_label := Label.new()
+	name_label.text = fdef.display_name if fdef != null else String(other_id)
+	name_label.add_theme_color_override("font_color", fdef.color if fdef != null else UITheme.COLOR_TEXT)
+	UITheme.style_display_label(name_label, 13)
+	other_side.add_child(name_label)
+	if fdef != null and fdef.emblem:
+		var other_crest := FactionCrest.new()
+		other_crest.setup(fdef, 34.0)
+		other_side.add_child(other_crest)
+
+	# Friendship value/band and treaty status each get their own line below
+	# the heads row instead of sharing one sentence.
+	var status_row := HBoxContainer.new()
+	status_row.add_theme_constant_override("separation", 8)
+	section.add_child(status_row)
+	var friendship_label := Label.new()
+	friendship_label.text = "友好度 %+d（%s）" % [relation.friendship, BAND_LABELS.get(band, "?")]
+	friendship_label.add_theme_color_override("font_color", band_color)
+	status_row.add_child(friendship_label)
+	var treaty_spacer := Control.new()
+	treaty_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_row.add_child(treaty_spacer)
+	var treaty_label := Label.new()
+	treaty_label.text = UITheme.bracket(_treaty_status_text(relation))
+	UITheme.style_mono_label(treaty_label, 11)
+	treaty_label.add_theme_color_override("font_color", UITheme.COLOR_GOLD if relation.treaty_type != GameEnums.TreatyType.NONE else UITheme.COLOR_TEXT_DIM)
+	status_row.add_child(treaty_label)
 
 	var ceasefire_row := HBoxContainer.new()
 	ceasefire_row.add_theme_constant_override("separation", 6)
@@ -170,6 +227,7 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	break_button.custom_minimum_size = Vector2(90, 36)
 	break_button.disabled = not can_act or relation.treaty_type == GameEnums.TreatyType.NONE
 	break_button.pressed.connect(_on_break_pressed.bind(other_id))
+	UITheme.style_danger_button(break_button)
 	actions_row.add_child(break_button)
 
 	var gift_funds_button := Button.new()
@@ -193,7 +251,18 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	tech_row.add_theme_constant_override("separation", 6)
 	var other_faction := GameState.get_faction(other_id)
 	var tech_picker := OptionButton.new()
-	tech_picker.custom_minimum_size = Vector2(360, 36)
+	# 360 could clip this OptionButton's own item text ("Tier<N> " plus the
+	# tech's name, which -- like every other untranslated *_key this session
+	# found clipping -- renders as its full raw key, e.g.
+	# "tech.fleet_logistics_network.name") -- widened for the same reason as
+	# StrategicMap's production/fleet dropdowns and PilotAssignmentPanel's
+	# unit picker.
+	tech_picker.custom_minimum_size = Vector2(420, 36)
+	tech_picker.clip_text = true
+	# fit_to_longest_item defaults to true and overrides clip_text for this
+	# button's own reported minimum size -- see StrategicMap._build_ui_overlay's
+	# matching comment on _production_option for how this was found live.
+	tech_picker.fit_to_longest_item = false
 	for gift_node_id: StringName in _giftable_tech_nodes(faction, other_faction):
 		var node := faction.generated_tech_nodes[gift_node_id] as GeneratedTechNodeState
 		var tech_def: TechDef = GameState.master_data.techs.get(node.tech_id)
@@ -222,6 +291,8 @@ func _build_faction_section(other_id: StringName, can_act: bool) -> Control:
 	intel_row.add_theme_constant_override("separation", 6)
 	var third_party_picker := OptionButton.new()
 	third_party_picker.custom_minimum_size = Vector2(200, 36)
+	third_party_picker.clip_text = true
+	third_party_picker.fit_to_longest_item = false
 	var third_party_ids := GameState.factions.keys()
 	third_party_ids.sort_custom(func(a: Variant, b: Variant) -> bool: return String(a) < String(b))
 	for third_id: StringName in third_party_ids:

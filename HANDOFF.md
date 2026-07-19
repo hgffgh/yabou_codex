@@ -964,6 +964,131 @@ codebase to extend — that would be a new kind of test infrastructure this
 project doesn't currently have (an interactive/`InputEventMouseButton`-
 injecting harness), not a gap in an existing one.
 
+A second real bug surfaced in the same round of interactive testing, right
+after the click-blocking fix above finally made it possible to actually
+click through to the strategic map: `StrategicMap`'s top bar overflowed
+past the 1600px viewport's right edge, taking `行動終了`/`メインメニュー`
+off-screen and unreachable. `top_bar_card`'s size is correctly computed
+from `top_bar.get_combined_minimum_size()` (a comment on this from an
+earlier milestone already explains why it's computed rather than guessed),
+so this wasn't a sizing-*calculation* bug — the single-row `HBoxContainer`
+genuinely needed more than 1600px once a 7th button (図鑑, added by the
+encyclopedia milestone above) joined the badge/turn/phase/resource label
+and the other 6 action buttons on one line, and the container faithfully
+reported that true, too-wide size. Fixed by splitting `top_bar` into two
+stacked rows (an info row: badge/separator/turn/phase-and-resources; an
+actions row: all 7 buttons) inside a `VBoxContainer`, which comfortably
+fits both rows and leaves headroom for future buttons without revisiting
+this again. Also has no headless test, for the same reason as the
+click-blocking fix — layout overflow against a specific viewport size is
+only observable by actually rendering and measuring the live scene tree,
+which no test in this project does.
+
+A follow-up visual pass (clicking through every panel after the top-bar fix
+above, prompted by a report that other UI still looked cramped/overflowing)
+found three more instances of the *same* underlying issue in different
+panels — an `OptionButton`/`Label` given a fixed `custom_minimum_size` that
+was sized for short content, but the actual item text is a full untranslated
+`*_key` (this project has no locale CSV yet, so `tr()` always returns the
+raw key verbatim — e.g. `unit.nova_scout.name` instead of a short real
+name) concatenated with cost/status info, which routinely runs to 40+
+characters. `OptionButton` doesn't wrap or ellipsize on its own, so it just
+hard-clips past its width:
+- `StrategicMap`'s side info panel: `panel_width` 320 → 420. Clipped the
+  production dropdown (`unit.nova_scout.name（資金300・物資200）`) and the
+  fleet-dispatch dropdown identically.
+- `PilotAssignmentPanel`'s unit picker: 360 → 480 (the row has room up to
+  ~500 before crowding the 搭乗/解除 buttons). Clipped
+  `unit.nova_scout.name [ノヴァ共和国首都] 搭乗:現在搭乗中`.
+- `DiplomacyPanel`'s tech-gift picker: 360 → 420. Same risk with
+  `"Tier<N> " + tech.*.name`, though not confirmed clipped by a screenshot
+  the way the other two were (the current sample data's tech name keys
+  happen to be short enough to have not visibly triggered it yet).
+- `SaveLoadPanel` needed a different fix: its slot label isn't
+  `custom_minimum_size`-bounded, it grows to fit its own text (a real
+  populated slot's "スロット0: ターン1 / ノヴァ共和国 / 2026-07-17
+  05:30:31" is far longer than an empty slot's placeholder), which pushed
+  the whole row past the scroll's width and clipped the `ロード` button —
+  a horizontal-overflow variant of the same root problem, not simple
+  under-sizing. Fixed by widening the card/scroll (560→680, 512→632) *and*
+  adding `label.clip_text = true` as a permanent safety net, so an even
+  longer faction name or timestamp ellipsizes instead of ever reintroducing
+  this.
+None of these have headless coverage either, for the same reason as the
+top-bar fix. The underlying missing-translation issue itself (every
+`*_key` field rendering as its raw key) is unaddressed — authoring a real
+locale CSV is a content task, not a layout one; these fixes make the
+current *worst-case* (raw keys) fit instead.
+
+`StrategicMap` gained an AI-turn progress indicator, in response to "I
+can't tell when the AI turn is going to end" — the 行動終了 button already
+switched to a disabled "AI行動中" state while `TurnManager.commit_turn()`
+walked the rest of `faction_turn_order`, but gave no sense of progress or
+remaining time. A third top-bar row (a `Label` plus a `ProgressBar`, hidden
+during the player's own `Phase.ORDERS`) shows "AI行動中: <faction> (i / N)",
+where N is however many AI factions exist in `faction_turn_order` (index 0
+is always the player, per `_build_faction_turn_order`) and i is
+`TurnManager.active_faction_index` while that faction is active — both
+already updated on every `active_faction_changed` emission, which
+`_update_turn_ui` (itself called from both `phase_changed` and
+`active_faction_changed`) already runs on, so no new signal wiring was
+needed, just a new branch inside the existing update function. Since a
+hidden `Control` doesn't count toward its `VBoxContainer` parent's combined
+minimum size, the top bar card has to be explicitly resized (a new
+`_resize_top_bar_card()` helper, reusing the same `get_combined_minimum_size`
+approach the top-bar-overflow fix above established) whenever this row's
+visibility flips, not just once at scene setup. With the current two-faction
+dataset (one AI faction) and no battle to auto-resolve, a turn with nothing
+contested finishes in under a frame, so the bar is real but can flash by too
+fast to consciously register — it'll read as genuinely informative once a
+third faction exists or the active turn includes an auto-resolved battle
+(which steps through simulated world-seconds one at a time, taking
+perceptibly longer). Confirmed by log inspection (no script errors during a
+live end-to-end turn) rather than a caught mid-transition screenshot, for
+that same reason. No headless coverage, for the same reason as this
+document's other UI-only fixes above.
+
+A follow-up report ("the production select box is still overflowing, and I
+can't find the label or progress bar at all") turned out to be two separate,
+unrelated bugs hiding behind one message. First: the panel-width-only fix
+above was validated against `nova_scout`'s label, but a longer worst-case
+entry — a locked unit like `nova_vanguard`, whose label gets a `"── 未解禁"`
+suffix appended once tech gating is in play — could still exceed even the
+widened box. Rather than keep guessing exact pixel widths against
+dynamically generated, untranslated-key-based text (inherently fragile, as
+this document already concluded once for `SaveLoadPanel`), `clip_text = true`
+was added as a blanket safety net to every affected `OptionButton`:
+`StrategicMap`'s production/squad/move pickers, `PilotAssignmentPanel`'s
+unit picker, and `DiplomacyPanel`'s tech-gift and third-party pickers.
+Confirmed interactively: opening the shipyard's production dropdown shows
+both `unit.nova_scout.name（資金300・物資200）` and the disabled, locked
+`unit.nova_vanguard.name（資金650・物資400）── 未解禁` entries in full, with
+neither the open list nor the closed button clipping mid-string.
+
+Second, and unrelated: the progress bar itself was never actually reaching
+the screen, not a sizing problem at all. In `TurnManager.commit_turn()`'s
+AI loop, `_begin_faction_turn()` emits `active_faction_changed` (which
+`StrategicMap` uses to update the bar) synchronously, but the following
+`await _finish_active_faction_turn()` only truly yields a frame to the
+renderer if something inside that call chain hits a genuine suspension
+point — specifically, `_run_combat_phase()` awaiting a `Signal`. On a turn
+with no squad contact at all, nothing in the chain ever awaits anything, so
+the whole per-faction iteration completes synchronously with zero frames
+rendered in between: the bar's visibility and value were being computed
+correctly the entire time, just never drawn before being hidden again.
+Fixed by adding `await get_tree().process_frame` immediately after
+`_begin_faction_turn()` in the AI loop, forcing at least one real frame to
+render while each AI faction is shown as active. With this dataset's single
+AI faction (Crimson Empire), that one forced frame is still extremely
+short — well under the ~500ms round-trip latency of external screenshot
+automation — so it could not be directly screenshotted during this
+verification pass either; confirmed instead by re-reading the fix against
+Godot's documented `await`/coroutine suspension semantics, plus the
+region-selection and production-dropdown checks above completing without
+new script errors. The bar will become straightforwardly observable once a
+third faction exists or a turn includes an auto-resolved battle, both noted
+as pending in the paragraph above.
+
 Strategic squad state now supports two-phase adjacent movement, per-unit and
 per-squad `movement_used`, faction reset, split, and merge. The strategic map
 issues player movement orders by squad ID, and the movement phase applies all
@@ -1118,8 +1243,293 @@ The old `UnitType`/`UnitStack`/`CombatResolver`/`BattleVignette` prototype
 classes and `res://data/legacy_units/` have been deleted; the typed registry
 at `res://data/units/` is now the only unit-definition path.
 
+The "Command Deck" UI redesign (all six figures of the 司令デッキ化計画
+design proposal) is complete across every strategic-phase panel plus the
+battle HUD:
+
+- `scripts/ui_theme.gd` carries the whole design system: a deep-navy
+  palette (`COLOR_BG`/`COLOR_PANEL`/`COLOR_BORDER` at low alpha), a single
+  warm accent (`COLOR_GOLD`, "this is yours / actionable") plus
+  `COLOR_GOOD`/`COLOR_DANGER` status colors, a condensed display face for
+  headings (`get_display_font()`, Bahnschrift with a Noto Sans JP
+  fallback) and a tabular-numeral mono face for data readouts
+  (`get_mono_font()`), the `bracket()` `"[ LABEL ]"` caption convention,
+  hairline-underline buttons (`style_primary_button`/`style_danger_button`
+  for the one primary/destructive action per screen — never more than
+  one), and zero corner radius everywhere (sharp frames, not rounded
+  cards). Four new small components back the figures that needed a shape
+  no existing control had: `scripts/exp_ring.gd` (radial EXP gauge),
+  `scripts/relation_gauge.gd` (center-out diplomacy gauge),
+  `scripts/faction_crest.gd` (procedural emblem badge), and
+  `scripts/hud_icon.gd` (the vector icon vocabulary — square/diamond/
+  chevron/etc. — extended from `region_node_view.gd`'s existing
+  facility/border glyphs to funds/materials/research stat widgets).
+- FIG.01 (top bar): `StrategicMap` was rebuilt around a Gihren-no-Yabou-
+  style command shell — a left category rail (情報/軍事/生産/開発/外交/
+  システム) with 軍事 and システム opening a flyout sub-list, a message
+  bar showing an advisor line, and a bottom resource ribbon (funds/
+  materials/research plus the AI-turn progress row) — replacing the old
+  single-row top bar entirely.
+- FIG.02 (region panel): every caption switched to the bracket convention
+  and the production queue shows one row per queued job with its own
+  progress track (not just the head job). 生産 deliberately has no
+  standalone panel of its own — the design proposal's own inventory
+  scopes production into the region panel rather than a fourth
+  independent screen, since it's inherently tied to whichever region is
+  selected; the 生産 rail button just points the player at the region
+  panel instead of pretending to be an empty fourth action. The
+  "生産:"/"艦隊派遣先:" section labels were the last pieces still using
+  the old plain colon-suffixed style instead of the bracket convention
+  every other caption in the same panel already used; both now go through
+  a shared `_build_section_header()` helper (also de-duplicating what used
+  to be separately inlined in the queue header).
+- FIG.03 (diplomacy): `DiplomacyPanel` replaced the single "友好度 N (帯)"
+  sentence with a `FactionCrest` on each side of a `RelationGauge` that
+  fills from the center toward whichever faction is favored, plus a
+  separate bracketed treaty-status readout.
+- FIG.04 (pilot assignment): `PilotAssignmentPanel` replaced the separate
+  "Lv%d" label + linear EXP bar with one `ExpRing` (level centered inside
+  a radial progress ring that turns `COLOR_DANGER` while injured instead
+  of needing a second colored label), plus new skill chips surfacing
+  `PilotDef.skill_ids` in the strategic UI for the first time.
+- FIG.05 (event): `EventPanel` gained a dedicated gold-bracketed speaker
+  nameplate line (previously folded into the body text with a blank
+  line) and a dash-to-arrow hover swap on choice buttons.
+- FIG.06 (battle HUD): `BattlePrototypeView` gained a squad-status sliver
+  in the flat HUD — one row per squad, each a fixed-width tag plus either
+  a thin HP track/percentage (own squad, or a confirmed enemy) or a
+  bracketed "未確認" fog tag showing the live abstract engagement distance
+  (`BattleRuntimeState.engagement_distance_m`) when engaged. Built once
+  per squad at battle start (`_build_squad_status_sliver`/
+  `_build_squad_status_row`) and kept current every `_process` tick
+  (`_sync_squad_status_sliver`), including flipping a row from fog tag to
+  real HP track the instant `BattleSquadState.intel_confirmed` goes true
+  mid-battle — this was previously entirely absent from the flat HUD; the
+  only per-squad HP readout during a live battle was the in-3D billboard
+  bars over each robot (easy to lose behind the camera) or the one-time
+  pre-battle confirmation snapshot. Godot's `StyleBoxFlat` has no dashed-
+  border option (the design reference's fog tag uses a dashed border), so
+  a solid hairline border is used instead — the same simplification every
+  other panel border already makes.
+- Design-principle "数字は生きている" (numbers are alive): `UITheme.
+  animate_value` (used by `StrategicMap`'s funds/materials/research
+  readouts) eases a value change over a tween instead of snapping, so the
+  result of ending a turn visibly returns to the screen.
+- Explicitly deferred, matching the design proposal's own P3 scope: SFX
+  call-hook stubs (決定/キャンセル/警告音) on every button. No audio
+  system exists in this project yet, and the proposal itself treats sound
+  sourcing as a separate, later concern from the call-hook wiring — this
+  pass covered every *visual* figure but left that wiring untouched
+  rather than adding dead hooks nothing plays through yet.
+
+**A real, previously-undiscovered rendering bug was found and fixed while
+finally doing a live visual QA pass of the Command Deck redesign above** — a
+gap this document already flagged for its own earlier UI-only fixes
+(headless smoke tests only prove a scene *constructs*, not that it *looks
+right*), and this is the first time anyone actually did that interactive
+pass for this milestone. External tooling to drive/screenshot a live
+Windows build was assembled for this (`Start-Process` with the non-console
+`Godot_v4.7.1-stable_win64.exe` to avoid the console build's stdout hanging
+the launching shell, `user32.dll` `SetCursorPos`/`mouse_event` for clicks,
+`System.Drawing`'s `CopyFromScreen` for screenshots — none of this existed
+in the project before, all improvised in-session, no new project skill
+file was written for it). The `StrategicMap` region info panel's five
+caption/value rows (所有/資源産出/防御補正/補給/駐留戦力) turned out to
+render every *caption* correctly but every *value* as fully invisible —
+not clipped, not mispositioned, not miscolored, just never drawn at all,
+with zero script errors. Bisecting it (screenshot after screenshot, each
+isolating one property) eventually proved it wasn't a logic bug at all:
+`_region_owner_label.text` etc. were always correct, right up until a
+deferred `get_viewport().get_texture().get_image().save_png(...)` call —
+Godot's own internal screenshot, added specifically to rule out the
+external Win32 capture tool itself being the problem — confirmed the exact
+same blank rendering baked into the actual frame, with every introspectable
+Control property (`.size`, `.global_position`, `.visible`, `.modulate`,
+resolved theme font/color) reporting entirely normal, on-screen, opaque
+values the whole time. Isolated to this: at this nesting depth
+(`CanvasLayer > Control > Panel > VBoxContainer > row`), a Label acting as
+or sitting beside an `EXPAND`-flagged sibling (tried and confirmed broken:
+the value Label itself with `SIZE_EXPAND_FILL` + `horizontal_alignment =
+RIGHT`; `SIZE_EXPAND | SIZE_SHRINK_END` instead; a separate expanding
+spacer `Control`; right-docking anchors — `anchor_left`/`anchor_right` =
+1.0 — with negative offsets) renders invisible in this Godot 4.7.1 build,
+even though a `ColorRect` given the exact same `SIZE_EXPAND_FILL` flag in
+the same slot, added purely to visualize the bug, rendered its color fine
+(oversized and pushed off-panel, but visible) — this is specific to Label
+text rendering, not Control layout/positioning in general. The fix used
+everywhere this pattern existed: a plain (non-Container) `Control` for the
+row, with every Label inside it given plain absolute `.position`/`.size`
+computed from the row's own known fixed width instead of resolved via
+anchors or container flex flags — matching how `caption_label` (which
+never touches anchors/expand) already rendered correctly the entire time.
+Fixed in three places this pattern had been copied into across the
+redesign: `StrategicMap._build_info_row` (the one actually found via
+screenshots), `PilotAssignmentPanel._build_pilot_row`'s `status_label`
+(same structure, confirmed separately broken and separately fixed, then
+live-verified through the 軍事 flyout → パイロット編成 showing "[ 出撃可能
+]" correctly right-aligned), and `BattlePrototypeView._build_squad_status_row`'s
+`hp_value` (same structural pattern -- an `EXPAND`-flagged `ProgressBar`
+sibling ahead of a plain Label -- fixed by inspection and covered by the
+existing headless smoke test, not separately live-verified since it needs
+a real battle in progress to reach). Root cause not identified beyond "an
+`EXPAND`-flagged sibling somewhere in the same immediate parent" being the
+trigger; anyone adding a new right-aligned value/label pair to any of these
+panels should copy the plain-absolute-position pattern from
+`_build_info_row` rather than reaching for `SIZE_EXPAND_FILL` +
+`horizontal_alignment = RIGHT`, which looks correct, compiles, passes every
+headless test, and silently renders nothing.
+
+Correction/narrowing from later in the same session, once `StrategicMap._build_queue_row`
+and `ProductionPanel._build_queue_row` (below) were actually exercised live
+with a real queued job instead of only ever showing the empty-queue status
+label: an `EXPAND`-flagged Label with its *default* (left) alignment
+renders fine even sitting first in a row ahead of a plain sibling Label --
+confirmed live, a queued unit's name and fraction both showed correctly.
+So the trigger isn't "any `EXPAND` sibling in the row" as broadly as first
+written above; it's specifically `SIZE_EXPAND_FILL`/anchors *combined with*
+`horizontal_alignment = RIGHT` (or `SIZE_SHRINK_END`) on the Label actually
+being pushed toward the far edge. The plain-absolute-position workaround
+above is still the right call for every *right-aligned* value/label pair;
+a plain `EXPAND`-flagged Label at its default left alignment (e.g. a name
+label ahead of a fixed-width numeric readout) does not need it.
+
+A round of "実際に動く画面を見て、そこから直したい" (redesign is code-
+complete; now make it actually usable, verified live) feedback closed five
+concrete gaps the smoke-test-only validation above couldn't catch:
+
+- **Event dialogue/choice/title text was every raw, untranslated `*_key`**
+  (this project had zero locale infrastructure before this). Added
+  `res://locale/strings_ja.csv` (Godot's CSV translation source format:
+  `keys,ja` header, one `key,japanese text` row per line) covering all 28
+  keys `data/events/*.tres` actually references (4 speaker names, 8
+  events' worth of title/dialogue/choice text, hand-written to match each
+  event's `faction_id`/`condition_tree`/effect payload rather than being
+  generic placeholder copy), and registered it in `project.godot`'s new
+  `[internationalization]` section
+  (`locale/translations`/`locale/fallback = "ja"`). Godot's CSV importer
+  compiles this into `res://locale/strings_ja.ja.translation` (gitignored,
+  same as every other `*.translation` this project's `.gitignore` already
+  excludes as a build artifact) -- `godot --headless --path . --import`
+  regenerates it, the same one-time step already documented below for a
+  new `class_name` to resolve globally. Confirmed via a throwaway
+  `--script` entry point calling `tr()` directly against several of the
+  new keys (real Japanese text back, not the raw key) rather than through
+  the full event-trigger flow, since `nova_main_001_first_contact`'s
+  `turn_at_least: 1` condition is satisfied from the very first frame of a
+  new game but only actually *displays* on a `phase_changed` signal edge,
+  which the player's very first turn never fires (no prior phase to
+  transition away from) -- a real, separate, and out-of-scope gap in
+  `StrategicMap._on_phase_changed`'s auto-open trigger, not something this
+  translation work needed to fix to be verified. Only event content was
+  translated (matching the specific request); every other `*_key` across
+  units/weapons/pilots/techs still renders as its raw key, unchanged.
+- **`StrategicMap`'s region side panel had two more real bugs live
+  screenshots caught that headless tests structurally cannot**: (1) the
+  panel's background was fully transparent (`bg_color` alpha 0, inherited
+  from the command shell's own intentional "show the live map through the
+  open middle area" treatment -- appropriate there, not here), so the 2D
+  strategic map's own region nodes/labels visibly bled through and
+  overlapped this panel's text whenever the camera happened to place one
+  nearby; fixed by giving `side_panel` `UITheme.COLOR_PANEL` (already
+  near-opaque, alpha 0.97) instead. (2) `OptionButton.fit_to_longest_item`
+  (defaults to `true`) silently overrides `clip_text` for the control's
+  own *reported minimum size* -- confirmed live that `_production_option`
+  was reporting/rendering at 576px wide (driven by the locked
+  `nova_vanguard` item's full `...── 未解禁`-suffixed label) despite
+  `clip_text = true`, spilling visibly out past the 384px-wide row and the
+  panel's own right edge ("右側のパネルのボタンがはみ出ている"). Every
+  `OptionButton` in the project that already sets `clip_text = true` as a
+  width safety net (`StrategicMap`'s production/squad/move pickers,
+  `PilotAssignmentPanel`'s unit picker, `DiplomacyPanel`'s tech-gift and
+  third-party pickers) now also sets `fit_to_longest_item = false`,
+  since `clip_text` alone was never actually sufficient on its own.
+- **`EncyclopediaPanel`** ("情報" screen) replaced its one-line
+  concatenated-prose-per-entry rows (`"%s ── %s ／ HP%d EN%d..."`) with a
+  bordered card per unit/weapon/pilot: a faction-colored `HudIcon` glyph +
+  name header, then 2-4 labeled mini-gauges (`ProgressBar` + plain
+  absolute-position caption/value Labels, per the pattern above) instead
+  of a wall of numbers -- HP/EN/firepower/armor for units, power/accuracy
+  for weapons, all five combat stats for pilots. Caught and fixed a real
+  bug of its own while first testing this live: one gauge referenced a
+  `UITheme.COLOR_NOVA` constant that was never actually defined (a
+  copy-paste leftover from an earlier faction-blue literal), which doesn't
+  fail at `strategic_map.gd`'s own parse time (it only references
+  `EncyclopediaPanel` nominally) but silently breaks `EncyclopediaPanel.new()`
+  itself with no script error surfacing through any of the logging paths
+  tried (`print()` to a redirected stdout file lost the tail of output to
+  buffering across a forceful process kill even after the window had
+  visibly closed; the fix was writing straight to a `user://` file via
+  `FileAccess` with an explicit `.close()` per line, bisecting exactly
+  which of several `_plog()` checkpoints stopped appearing).
+- **The 部隊編成 (formation) dialog was the one screen in the entire
+  "軍事" command group that never received the Command Deck pass at
+  all** -- it was still a bare native `Window` (its own OS-level title
+  bar, no `UITheme` applied, plain default-grey Godot controls), sitting
+  out as visibly unstyled next to every other panel. Rebuilt as the same
+  CanvasLayer/dim/CenterContainer/card modal every sibling panel uses, and
+  each unit slot gained an HP/EN mini-gauge pair (previously no visual
+  condition readout existed here at all, only the unit's plain name).
+  Fixed a real, separate, and previously game-breaking usability bug found
+  while first trying to open this dialog live: `StrategicMap._squad_option`
+  was never given an initial `.select(0)` after being repopulated, so
+  `selected` stayed `-1` and both 移動命令 and 部隊編成 silently stayed
+  `disabled` the instant a region with a real squad was selected, with no
+  explanation -- `_update_info_panel()` now auto-selects the first squad
+  whenever the dropdown has any items.
+- **"生産は各拠点で行うように"**: production was previously reachable only
+  by first clicking the one specific map node that happened to own a
+  facility -- the 生産 rail button itself was inert, just a hint message
+  pointing back at the map, unlike every other root command (軍事/開発/
+  外交/システム all open a real panel). This is exactly the gap the
+  "司令デッキ化計画" design proposal's own roadmap had already called out
+  ("艦隊運用と同格の頻出操作なのでルートに独立させる") but which the
+  redesign pass documented earlier in this section deliberately deferred.
+  New `ProductionPanel` (`scenes/strategic_map/production_panel.gd`, same
+  `_refresh()`-rebuilds-`_rows` convention as `DiplomacyPanel`) lists one
+  card per production-capable region the player owns -- name header, live
+  queue, unit picker, reserve button -- so every base's production is
+  reachable in one place without hunting for the right map node first.
+  Confirmed live end-to-end: opened from the 生産 rail button, queued a
+  `nova_scout` at the shipyard, watched the queue row (name/fraction/
+  progress bar) appear immediately via `_refresh()`.
+
+The external tooling used to actually drive and screenshot a live windowed
+build for all of the above (none of it existed in this project before this
+session, and no permanent project skill file was written for it, since it
+was assembled ad hoc): `Start-Process` against the *non*-console
+`Godot_v4.7.1-stable_win64.exe` (the console build's stdout hung the
+launching shell without output redirection, and even with redirection its
+buffering proved unreliable mid-session -- see the `EncyclopediaPanel` bug
+above); `user32.dll`'s `SetCursorPos`/`mouse_event` for clicks, from a
+small reusable `click.ps1`; `System.Drawing`'s `CopyFromScreen` for
+screenshots, from a small reusable `screenshot.ps1`. One recurring
+coordinate-math mistake worth flagging for next time: this window's
+client-area top-left in screen coordinates is `(window_left, window_top)`
+from `GetWindowRect` (no separate title-bar offset needed for `X`; `Y`
+needs the title bar's height accounted for only when eyeballing a crop
+against the *visible* screenshot rather than reading a live `global_position`
+debug print) -- several clicks aimed at the right-side region panel this
+session landed on the map instead from reusing an `X` coordinate that
+belonged to the left-side command rail.
+
 ### Validation and setup
 
+- The Command Deck redesign was checked by re-running
+  `res://tests/strategic_map_smoke_test.gd`, `res://tests/battle_view_smoke_test.gd`,
+  and `res://tests/fog_of_war_test.gd` headless after every panel's changes
+  (all pass) — these confirm the rebuilt scenes construct and the
+  fog-of-war-driven sliver toggle logic still behaves correctly, not that
+  the result visually matches the design proposal's mockups. An interactive
+  pass in a live windowed build followed later the same working session
+  (see the "real, previously-undiscovered rendering bug" and "実際に動く
+  画面を見て" paragraphs above) and did catch several real bugs headless
+  coverage structurally cannot — region-panel value labels rendering fully
+  invisible, the map bleeding through the panel background, an
+  `OptionButton` physically overflowing its row, and a squad dropdown
+  silently leaving 移動命令/部隊編成 disabled. `ProductionPanel` (new this
+  same pass) has no automated test of its own, verified live only:
+  opened from the 生産 rail button, a `nova_scout` queued at the shipyard,
+  the queue row appearing correctly after `_refresh()`.
 - Debug builds load and validate all new master data during `GameState` startup.
 - `res://data/pilot_skills/` is intentionally empty in the first dataset.
 - Run runtime-state tests with `godot --headless --path . --script

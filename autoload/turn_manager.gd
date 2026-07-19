@@ -362,6 +362,18 @@ func commit_turn() -> void:
 			is_resolving_turn = false
 			return
 		_begin_faction_turn()
+		# _begin_faction_turn emits active_faction_changed synchronously, but
+		# await below only actually yields to the engine (letting a frame
+		# render) if _finish_active_faction_turn's own chain hits a genuine
+		# suspension point -- e.g. a real await on a Signal. On a turn with
+		# no squad contact at all, _run_combat_phase never awaits anything,
+		# so the whole per-faction iteration completes synchronously with no
+		# frame ever drawn in between: StrategicMap's AI-turn-progress bar
+		# (or anything else reacting to active_faction_changed) would update
+		# its state correctly but never actually get shown on screen. Force
+		# one frame so "this AI faction is now active" is always visible for
+		# at least a moment before its turn resolves.
+		await get_tree().process_frame
 		var faction := GameState.get_faction(active_faction_id) as Faction
 		if faction == null or faction.eliminated:
 			continue

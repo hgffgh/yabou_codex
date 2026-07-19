@@ -106,30 +106,39 @@ func _build_node_row(faction: Faction, node_id: StringName, can_act: bool) -> Co
 	var node := faction.generated_tech_nodes[node_id] as GeneratedTechNodeState
 	var tech_def: TechDef = GameState.master_data.techs.get(node.tech_id)
 	var tech_name := tr(String(tech_def.display_name_key)) if tech_def != null else String(node.tech_id)
+	var gifted_tag := "（贈与）" if node.gifted else ""
+	var prereq_met := TurnManager._node_prerequisites_met(faction, node)
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var label := Label.new()
-	label.custom_minimum_size = Vector2(420, 0)
-	var gifted_tag := "(贈与)" if node.gifted else ""
-	if node.researched:
-		label.text = "Tier%d %s %s ── 研究済み" % [node.tier, tech_name, gifted_tag]
-	elif TurnManager._node_prerequisites_met(faction, node):
-		var config: CampaignConfig = GameState.campaign_config
-		label.text = "Tier%d %s %s ── コスト%d・%dターン" % [
-			node.tier, tech_name, gifted_tag, config.research_costs[node.tier - 1], config.research_turns[node.tier - 1],
-		]
-	else:
-		label.text = "Tier%d %s %s ── 前提未達成" % [node.tier, tech_name, gifted_tag]
+	label.custom_minimum_size = Vector2(280, 0)
+	label.text = "Tier%d %s%s" % [node.tier, tech_name, gifted_tag]
 	row.add_child(label)
+
+	# A colored status word instead of folding it into the name sentence:
+	# green once researched, gold while it's a real available choice, dim
+	# while blocked -- the three states read apart before the text does.
+	var status_label := Label.new()
+	status_label.custom_minimum_size = Vector2(150, 0)
+	if node.researched:
+		status_label.text = "研究済み"
+		status_label.add_theme_color_override("font_color", UITheme.COLOR_GOOD)
+	elif prereq_met:
+		var config: CampaignConfig = GameState.campaign_config
+		status_label.text = "コスト%d・%dターン" % [config.research_costs[node.tier - 1], config.research_turns[node.tier - 1]]
+		status_label.add_theme_color_override("font_color", UITheme.COLOR_GOLD)
+	else:
+		status_label.text = "前提未達成"
+		status_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	row.add_child(status_label)
 
 	var button := Button.new()
 	button.text = "研究開始"
 	button.custom_minimum_size = Vector2(90, 36)
-	button.disabled = not can_act or node.researched or faction.current_research != null \
-		or not TurnManager._node_prerequisites_met(faction, node)
+	button.disabled = not can_act or node.researched or faction.current_research != null or not prereq_met
 	button.pressed.connect(_on_research_pressed.bind(node_id))
 	row.add_child(button)
 

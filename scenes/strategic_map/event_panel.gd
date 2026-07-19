@@ -17,6 +17,7 @@ var _current_event_id: StringName = &""
 var _dialogue_index: int = 0
 
 var _title_label: Label
+var _speaker_label: Label
 var _body_label: Label
 var _next_button: Button
 var _choice_box: VBoxContainer
@@ -50,10 +51,20 @@ func setup(faction_id: StringName) -> void:
 	card.add_child(vbox)
 
 	_title_label = Label.new()
-	_title_label.add_theme_font_size_override("font_size", 22)
+	UITheme.style_display_label(_title_label, 22)
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(_title_label)
+
+	# The speaking character's name gets its own gold nameplate line instead
+	# of being folded into the body text with a blank line -- a voice should
+	# be identifiable before you've read a word of what it says. Bracketed
+	# mono text ("[ 戦務参謀 ]") matches every other panel's caption
+	# convention instead of reading as an ordinary sentence.
+	_speaker_label = Label.new()
+	UITheme.style_mono_label(_speaker_label, 12)
+	_speaker_label.add_theme_color_override("font_color", UITheme.COLOR_GOLD)
+	vbox.add_child(_speaker_label)
 
 	_body_label = Label.new()
 	_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD
@@ -95,8 +106,9 @@ func _show_current_dialogue_entry(def: EventDef) -> void:
 		return
 	var entry := def.dialogue_entries[_dialogue_index] as Dictionary
 	var speaker_key := StringName(entry.get("speaker_key", ""))
-	var body := tr(String(entry.get("body_key", "")))
-	_body_label.text = "%s\n\n%s" % [tr(String(speaker_key)), body] if not speaker_key.is_empty() else body
+	_speaker_label.visible = not speaker_key.is_empty()
+	_speaker_label.text = UITheme.bracket(tr(String(speaker_key))) if not speaker_key.is_empty() else ""
+	_body_label.text = tr(String(entry.get("body_key", "")))
 
 func _on_next_pressed() -> void:
 	var def := GameState.master_data.events.get(_current_event_id) as EventDef
@@ -117,13 +129,29 @@ func _show_choices(def: EventDef) -> void:
 		ack.text = "確認"
 		ack.custom_minimum_size = Vector2(0, 40)
 		ack.pressed.connect(_on_choice_pressed.bind(&""))
+		UITheme.style_primary_button(ack)
 		_choice_box.add_child(ack)
 		return
 	for choice_value: Variant in def.choice_entries:
 		var choice := choice_value as Dictionary
+		var choice_text := tr(String(choice.get("label_key", "")))
 		var button := Button.new()
-		button.text = tr(String(choice.get("label_key", "")))
+		button.text = "－  %s" % choice_text
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size = Vector2(0, 40)
+		button.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+		# A plain dash reads as inert list text; swapping it for a gold arrow
+		# on hover is the only cue (besides the button's own underline) that
+		# this line is the one about to be chosen -- mirrors the design
+		# reference's "－" → "▸" hover swap.
+		button.mouse_entered.connect(func() -> void:
+			button.text = "▸  %s" % choice_text
+			button.add_theme_color_override("font_color", UITheme.COLOR_GOLD)
+		)
+		button.mouse_exited.connect(func() -> void:
+			button.text = "－  %s" % choice_text
+			button.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+		)
 		button.pressed.connect(_on_choice_pressed.bind(StringName(choice.get("id", ""))))
 		_choice_box.add_child(button)
 

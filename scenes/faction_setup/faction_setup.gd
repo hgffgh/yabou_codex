@@ -94,6 +94,7 @@ func _ready() -> void:
 	_begin_button.custom_minimum_size = Vector2(240, 46)
 	_begin_button.disabled = true
 	_begin_button.pressed.connect(_on_begin_pressed)
+	UITheme.style_primary_button(_begin_button)
 	vbox.add_child(_begin_button)
 
 	var back_button := Button.new()

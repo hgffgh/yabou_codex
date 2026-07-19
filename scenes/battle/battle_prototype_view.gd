@@ -31,6 +31,7 @@ var result_summary: Label
 var battle_started := false
 var game_state: Node
 var turn_manager: Node
+var _squad_status_rows: Dictionary = {}  # StringName -> Dictionary of row controls
 
 func setup(value: BattleRuntimeState) -> void:
 	battle = value
@@ -48,7 +49,8 @@ func _ready() -> void:
 
 func _build_hud() -> void:
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.012, 0.02, 0.045, 1.0)
+	backdrop.color = UITheme.COLOR_BG
+	backdrop.theme = UITheme.get_theme()
 	add_child(backdrop)
 	UIUtils.fill_parent(backdrop)
 	var title := Label.new()
@@ -83,8 +85,145 @@ func _build_hud() -> void:
 	retreat.text = "侵攻部隊を撤退"
 	retreat.pressed.connect(_request_attacker_retreat)
 	controls.add_child(retreat)
+	_build_squad_status_sliver(controls)
 	_build_prebattle_panel(backdrop)
 	_build_result_panel(backdrop)
+
+## FIG.06 of the "司令デッキ化計画" design proposal: a compact tag + thin HP
+## track per squad, or a fog tag for an unconfirmed enemy, replacing what
+## used to be entirely absent from the flat HUD -- the only per-squad HP
+## readout during a live battle was either the in-3D billboard bars over
+## each robot (easy to lose behind the camera/other sprites) or the
+## pre-battle confirmation panel (a one-time snapshot, not live). Built once
+## per squad here; _sync_squad_status_sliver() (called from _process) keeps
+## every row current, including flipping a still-unconfirmed enemy row over
+## to its real HP track the instant BattleSquadState.intel_confirmed goes
+## true mid-battle.
+func _build_squad_status_sliver(parent: Control) -> void:
+	parent.add_child(HSeparator.new())
+	var header := Label.new()
+	header.text = UITheme.bracket("SQUADS 部隊状況")
+	UITheme.style_mono_label(header, 10)
+	header.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	parent.add_child(header)
+	var squad_ids := battle.squad_states_by_id.keys()
+	squad_ids.sort()  # stable order, matching every other stable-ID iteration in this codebase
+	for squad_id: StringName in squad_ids:
+		var squad := battle.squad_states_by_id[squad_id] as BattleSquadState
+		_squad_status_rows[squad_id] = _build_squad_status_row(parent, squad)
+
+## One row: a fixed-width side/id tag, then either an HP track+percentage
+## (own squad, or a confirmed enemy) or a fog tag (an unconfirmed enemy) --
+## both built up front and toggled by _sync_squad_status_sliver() rather
+## than rebuilt every frame, since the squad list itself never changes
+## mid-battle.
+func _build_squad_status_row(parent: Control, squad: BattleSquadState) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	parent.add_child(row)
+
+	var tag := Label.new()
+	UITheme.style_mono_label(tag, 11)
+	tag.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	tag.custom_minimum_size = Vector2(96, 0)
+	row.add_child(tag)
+
+	# hp_group is a plain Control (not HBoxContainer), and hp_track/hp_value
+	# inside it use plain absolute position/size instead of size_flags/
+	# anchors -- see the matching, more detailed comment on
+	# StrategicMap._build_info_row for why: an EXPAND-flagged sibling in the
+	# same HBoxContainer as a Label renders that Label fully invisible in
+	# this Godot version, confirmed live against a deferred
+	# get_viewport().get_texture().get_image() capture. hp_group itself can
+	# still take row's leftover width via SIZE_EXPAND_FILL (that part is
+	# fine -- the bug is specific to Label rendering, not Control sizing/
+	# positioning in general, and a plain Control has no text of its own to
+	# fail to render); its children just can't rely on knowing that
+	# resolved width, so 184 (row's own known width, 290 controls minus 96
+	# tag minus 10 separation) is hardcoded the same way the region panel
+	# fix hardcodes its own row width instead of querying it.
+	var hp_group := Control.new()
+	hp_group.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(hp_group)
+	var hp_track := ProgressBar.new()
+	hp_track.show_percentage = false
+	hp_track.position = Vector2(0, 4)
+	hp_track.size = Vector2(184.0 - 48.0, 4)
+	hp_group.add_child(hp_track)
+	var hp_value := Label.new()
+	UITheme.style_mono_label(hp_value, 11)
+	hp_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hp_value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hp_value.position = Vector2(184.0 - 40.0, -6.0)
+	hp_value.size = Vector2(40.0, 20.0)
+	hp_group.add_child(hp_value)
+
+	# Godot's StyleBoxFlat has no dashed-border option (the design
+	# reference's fog tag uses `border: 1px dashed`) -- a solid hairline
+	# border is the closest native equivalent, matching every other panel
+	# border UITheme already builds as fill-less + hairline.
+	var fog_wrap := PanelContainer.new()
+	var fog_style := StyleBoxFlat.new()
+	fog_style.bg_color = Color(0, 0, 0, 0)
+	fog_style.border_color = UITheme.COLOR_BORDER
+	fog_style.set_border_width_all(1)
+	fog_style.content_margin_left = 10
+	fog_style.content_margin_right = 10
+	fog_style.content_margin_top = 3
+	fog_style.content_margin_bottom = 3
+	fog_wrap.add_theme_stylebox_override("panel", fog_style)
+	fog_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(fog_wrap)
+	var fog_label := Label.new()
+	fog_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UITheme.style_mono_label(fog_label, 10.5)
+	fog_label.add_theme_color_override("font_color", UITheme.COLOR_TEXT_DIM)
+	fog_wrap.add_child(fog_label)
+
+	return {
+		"is_own": squad.faction_id == game_state.player_faction_id,
+		"tag": tag, "hp_group": hp_group, "hp_track": hp_track, "hp_value": hp_value,
+		"fog_wrap": fog_wrap, "fog_label": fog_label,
+	}
+
+## Re-evaluates every row's known/unconfirmed split and HP fraction each
+## frame -- cheap (a handful of squads, a handful of units each) and avoids
+## a second, separate signal path just to catch intel_confirmed flipping
+## mid-battle when _process is already the single per-frame sync point for
+## every other piece of battle HUD state.
+func _sync_squad_status_sliver() -> void:
+	for squad_id: StringName in _squad_status_rows:
+		var squad := battle.squad_states_by_id.get(squad_id) as BattleSquadState
+		if squad == null:
+			continue
+		var row: Dictionary = _squad_status_rows[squad_id]
+		var is_own: bool = row.is_own
+		var side_text := "自隊" if is_own else "敵"
+		var known := is_own or squad.intel_confirmed
+		(row.tag as Label).text = "%s・%s" % [side_text, squad.squad_id] if known else "%s・接触反応" % side_text
+
+		(row.hp_group as Control).visible = known
+		(row.fog_wrap as Control).visible = not known
+		if known:
+			var current_hp := 0
+			var max_hp := 0
+			for unit_id: StringName in squad.unit_instance_ids:
+				var unit := battle.unit_states_by_id[unit_id] as BattleUnitState
+				current_hp += maxi(0, unit.current_hp)
+				max_hp += unit.max_hp
+			var ratio := float(current_hp) / float(maxi(1, max_hp))
+			var hp_track := row.hp_track as ProgressBar
+			hp_track.max_value = 1.0
+			hp_track.value = ratio
+			var fill_style := StyleBoxFlat.new()
+			fill_style.bg_color = UITheme.COLOR_GOOD if ratio > 0.5 \
+				else (UITheme.COLOR_GOLD if ratio > 0.2 else UITheme.COLOR_DANGER)
+			hp_track.add_theme_stylebox_override("fill", fill_style)
+			(row.hp_value as Label).text = "%d%%" % roundi(ratio * 100.0)
+		else:
+			var distance := battle.engagement_distance_m(squad_id)
+			var fog_label := row.fog_label as Label
+			fog_label.text = "未確認 — 交戦距離 %dm" % int(distance) if is_finite(distance) else "未確認"
 
 func _build_prebattle_panel(parent: Control) -> void:
 	prebattle_panel = PanelContainer.new()
@@ -108,6 +247,7 @@ func _build_prebattle_panel(parent: Control) -> void:
 	var start_button := Button.new()
 	start_button.text = "30秒ラウンド開始"
 	start_button.pressed.connect(_confirm_round)
+	UITheme.style_primary_button(start_button)
 	content.add_child(start_button)
 
 func _build_result_panel(parent: Control) -> void:
@@ -129,6 +269,7 @@ func _build_result_panel(parent: Control) -> void:
 	var close_button := Button.new()
 	close_button.text = "戦略画面へ戻る"
 	close_button.pressed.connect(_complete_result)
+	UITheme.style_primary_button(close_button)
 	content.add_child(close_button)
 
 func _build_3d_world() -> void:
@@ -346,6 +487,7 @@ func _process(delta: float) -> void:
 	_sync_combat_events()
 	_sync_unit_status()
 	_sync_control_point_visuals()
+	_sync_squad_status_sliver()
 	status_label.text = "経過 %.1f / 300秒  x%.0f  選択: %s" % [battle.elapsed_world_sec, battle.time_scale, selected_squad_id]
 	if battle.has_unconfirmed_engagement(): _show_prebattle()
 

@@ -44,6 +44,7 @@ func _ready() -> void:
 	start_button.text = "キャンペーン開始"
 	start_button.custom_minimum_size = Vector2(240, 48)
 	start_button.pressed.connect(func(): SceneRouter.goto_faction_setup())
+	UITheme.style_primary_button(start_button)
 	vbox.add_child(start_button)
 
 	var quit_button := Button.new()
