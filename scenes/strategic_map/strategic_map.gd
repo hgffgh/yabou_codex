@@ -64,6 +64,19 @@ func _ready() -> void:
 
 	_update_turn_ui()
 	_update_info_panel()
+	# TurnManager.start_new_game() (called from faction_setup.gd, before this
+	# scene even exists) already ran the whole first _begin_faction_turn()
+	# synchronously -- including check_pending_events(), which can queue a
+	# turn-1 MAIN event (e.g. nova_main_001_first_contact's turn_at_least: 1)
+	# -- and its own phase_changed(ORDERS) emission fired into the void with
+	# no listener connected yet. _maybe_open_event_panel() reads live state
+	# (current_phase/active_faction_id/pending_event_ids) rather than the
+	# signal's payload and is already idempotent (it no-ops if an EventPanel
+	# is already open), so calling it once here catches that missed initial
+	# emission -- and anything else that left an event queued before this
+	# scene existed, e.g. loading a save mid-campaign -- without risking a
+	# double-open once the next real phase_changed signal arrives.
+	_maybe_open_event_panel()
 
 # ---------------- Background ----------------
 

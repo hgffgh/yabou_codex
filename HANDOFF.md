@@ -1512,6 +1512,30 @@ debug print) -- several clicks aimed at the right-side region panel this
 session landed on the map instead from reusing an `X` coordinate that
 belonged to the left-side command rail.
 
+**A real, previously-live bug found immediately after committing the above**:
+the turn-1 MAIN event (`nova_main_001_first_contact`, `turn_at_least: 1`)
+never actually appeared on a fresh campaign despite `pending_event_ids`
+being correctly populated. Root cause: `TurnManager.start_new_game()` is
+called from `faction_setup.gd`, *before* `SceneRouter.goto_strategic_map()`
+creates the `StrategicMap` scene that would otherwise catch its
+`phase_changed` signal -- `start_new_game` runs the whole first
+`_begin_faction_turn()` synchronously, including `check_pending_events()`
+and the trailing `_set_phase(Phase.ORDERS)`'s `phase_changed.emit()`, all
+while nothing is listening yet. Every *later* turn transition fires this
+signal with `StrategicMap` already alive and connected, so this only ever
+broke a brand-new campaign's very first MAIN event. Fixed by calling
+`StrategicMap._maybe_open_event_panel()` once directly from `_ready()`,
+right after connecting the signal -- that function already reads live
+state (`current_phase`/`active_faction_id`/`pending_event_ids`) rather than
+the signal's payload and already no-ops if an `EventPanel` is already open,
+so this catches the missed initial emission (and covers loading a save
+with an event already queued, the same way) without any risk of a double
+open once the next real `phase_changed` arrives. Confirmed live: a fresh
+campaign now opens 初接触 immediately on reaching the strategic map, in
+the real Japanese text from the locale CSV above, and resolving its choice
+correctly chains into `nova_sub_001_border_skirmish` (already satisfied
+from campaign start too) before returning control to the map.
+
 ### Validation and setup
 
 - The Command Deck redesign was checked by re-running
