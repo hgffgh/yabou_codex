@@ -1642,6 +1642,22 @@ already existed and had for several commits (`27b4067`) — this document's
 own "Recommended next task" prose above still described them as backend-
 only, left over from before that panel was built out; corrected in place.
 
+`AudioManager`'s three SFX categories are no longer silent: `_synthesize_tone`
+builds each one as a plain `AudioStreamWAV` in code at `_ready()` time --
+one or more sine-wave segments (each with its own short linear attack/
+release so back-to-back segments don't click at the boundary) written
+directly into a `PackedByteArray` of 16-bit PCM samples, no external file,
+import step, or asset pipeline involved. SFX_CONFIRM is two short rising
+notes, SFX_CANCEL a single flat note, SFX_WARNING four alternating low
+notes (a soft buzz). These are explicitly placeholders, not a final sound
+design pass -- `register_sfx()` remains the one call site to swap any of
+them for a real authored sound later, with nothing else in the game
+needing to change. Confirmed live: clicked through 開始/戻る in a windowed
+build (each hooked to SFX_CONFIRM/SFX_CANCEL via `UITheme.style_primary_
+button`/the panel's own back-button wiring) with the window staying
+responsive and the console log showing nothing beyond the pre-existing
+benign SteamManager warning.
+
 ### Validation and setup
 
 - The Command Deck redesign was checked by re-running
