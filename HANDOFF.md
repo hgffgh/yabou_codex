@@ -1680,6 +1680,39 @@ stay runtime-applied the same way `Sprite3D.modulate` does it today), and a
 `_build_squad_visuals` to actually instantiate `model_scene` and drive
 these clips is real remaining work once models matching that spec exist.
 
+That model now exists for one unit, generated rather than hand-authored:
+`tools/gen_unit_model.py` is a headless Blender (`blender --background
+--python ... -- <output.glb> [height]`) script that procedurally builds the
+7-bone rig section 9.1.1 specifies (root/torso/head/arm_l/arm_r/leg_l/leg_r),
+five primitive mesh parts each rigidly weighted 100% to one bone (a flat
+metal mecha has no reason to smooth-skin — this sidesteps weight painting
+entirely and reads as intentional "toy soldier" rigidity rather than a
+shortcut), and the five named actions (`idle`/`move`/`attack`/`hit`/
+`destroyed`) as keyframed bone rotations, exported via
+`export_animation_mode='ACTIONS'` so each action lands as its own glTF
+animation. `assets/models/units/nova_scout.glb` is its output, imported
+through the normal Godot pipeline and wired into `nova_scout.tres`'s
+`model_scene` in place of the empty placeholder.
+`BattlePrototypeView._build_squad_visuals` now instantiates `model_scene`
+via a new `_instantiate_model` (falls back to the old Sprite3D billboard
+if the result has no children — i.e. still the empty placeholder, which
+every other unit's model_scene still is), applies `UnitDef.size`'s existing
+0.8x/1.0x/1.35x scale to the whole model instead of just a sprite, plays
+`idle` on loop through a newly-found `AnimationPlayer`
+(`_find_animation_player`), and tints every `MeshInstance3D` via a fresh
+`material_override` multiplied by the same blue/red faction color the
+sprite used (`_tint_model_materials` — never bakes team color into a
+shared material, since a captured unit's `owner_faction_id` can change
+mid-campaign). `tests/unit_model_pipeline_test.gd` covers the rig/clip
+shape and the real-model-vs-placeholder fallback; confirmed live in a
+windowed build (a throwaway script reproducing battle_view_smoke_test.gd's
+fixture) that the model renders faction-tinted in the 3D battle view and
+that its idle animation's `current_animation_position` actually advances
+frame to frame rather than sitting frozen at 0. Only `nova_scout` has a
+real model so far -- `nova_vanguard`/`crimson_bastion` still render as the
+old billboard until someone runs the generator (or a real authored model)
+for them too.
+
 ### Validation and setup
 
 - The Command Deck redesign was checked by re-running

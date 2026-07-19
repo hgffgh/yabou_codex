@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://resources/unit_def.gd" id="1"]
 [ext_resource type="Texture2D" path="res://assets/sprites/units/scout_frame.svg" id="2"]
-[ext_resource type="PackedScene" path="res://scenes/units/placeholder_unit_model.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://assets/models/units/nova_scout.glb" id="3"]
 
 [resource]
 script = ExtResource("1")

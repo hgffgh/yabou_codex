@@ -19,6 +19,7 @@ var selection_markers: Dictionary = {}
 var control_point_labels: Dictionary = {}
 var control_point_materials: Dictionary = {}
 var unit_visuals: Dictionary = {}
+var unit_animation_players: Dictionary = {}
 var hp_bar_fills: Dictionary = {}
 var en_bar_fills: Dictionary = {}
 var transient_effects: Array[Dictionary] = []
@@ -443,17 +444,71 @@ func _build_squad_visuals() -> void:
 			unit_root.position = FORMATION_OFFSETS[battle_unit.slot_index]
 			root_node.add_child(unit_root)
 			unit_visuals[unit_id] = unit_root
-			var sprite := Sprite3D.new()
-			sprite.texture = unit_def.vignette_sprite if unit_def.vignette_sprite != null else unit_def.icon
-			sprite.pixel_size = 0.24
-			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			sprite.no_depth_test = false
-			sprite.position = Vector3(0, 42, 0)
 			var size_scale := [0.8, 1.0, 1.35][unit_def.size] as float
-			sprite.scale = Vector3.ONE * size_scale
-			sprite.modulate = Color(0.55, 0.85, 1.0) if squad.faction_id == game_state.player_faction_id else Color(1.0, 0.55, 0.55)
-			unit_root.add_child(sprite)
+			var tint := Color(0.55, 0.85, 1.0) if squad.faction_id == game_state.player_faction_id else Color(1.0, 0.55, 0.55)
+			var model_instance := _instantiate_model(unit_def)
+			if model_instance != null:
+				unit_root.add_child(model_instance)
+				model_instance.scale = Vector3.ONE * size_scale
+				_tint_model_materials(model_instance, tint)
+				var anim_player := _find_animation_player(model_instance)
+				unit_animation_players[unit_id] = anim_player
+				if anim_player != null and anim_player.has_animation(&"idle"):
+					anim_player.get_animation(&"idle").loop_mode = Animation.LOOP_LINEAR
+					anim_player.get_animation(&"move").loop_mode = Animation.LOOP_LINEAR
+					anim_player.play(&"idle")
+			else:
+				var sprite := Sprite3D.new()
+				sprite.texture = unit_def.vignette_sprite if unit_def.vignette_sprite != null else unit_def.icon
+				sprite.pixel_size = 0.24
+				sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+				sprite.no_depth_test = false
+				sprite.position = Vector3(0, 42, 0)
+				sprite.scale = Vector3.ONE * size_scale
+				sprite.modulate = tint
+				unit_root.add_child(sprite)
 			_add_unit_status_bars(unit_root, unit_id)
+
+## `UnitDef.model_scene` has been schema-required since the data-foundation
+## milestone but was never wired up -- every unit's model_scene pointed at
+## `scenes/units/placeholder_unit_model.tscn`, an empty Node3D with no
+## children, deliberately so this exact "instantiate and check whether
+## anything came back" fallback works without any per-unit flag. See
+## DATA_DEFINITION.md section 9.1.1 for the model spec (glTF, coordinate/
+## scale convention, five named AnimationPlayer clips) that a real
+## model_scene needs to satisfy for this to render/animate correctly.
+func _instantiate_model(unit_def: UnitDef) -> Node3D:
+	if unit_def.model_scene == null:
+		return null
+	var instance := unit_def.model_scene.instantiate() as Node3D
+	if instance == null or instance.get_child_count() == 0:
+		if instance != null:
+			instance.queue_free()
+		return null
+	return instance
+
+func _find_animation_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node
+	for child in node.get_children():
+		var found := _find_animation_player(child)
+		if found != null:
+			return found
+	return null
+
+## Real models must not bake a faction color into their texture (a captured
+## unit's owner_faction_id can change), so every MeshInstance3D gets a fresh
+## material tinted by multiplying the flat hull-grey the generator scripts
+## export against by the same blue/red tint the old Sprite3D.modulate used.
+func _tint_model_materials(node: Node, tint: Color) -> void:
+	if node is MeshInstance3D:
+		var material := StandardMaterial3D.new()
+		material.albedo_color = Color(0.72, 0.74, 0.78) * tint
+		material.metallic = 0.5
+		material.roughness = 0.45
+		(node as MeshInstance3D).material_override = material
+	for child in node.get_children():
+		_tint_model_materials(child, tint)
 
 func _add_unit_status_bars(unit_root: Node3D, unit_id: StringName) -> void:
 	var background := _make_status_bar(Color(0.02, 0.03, 0.04, 0.9), 58.0, 10.0)
